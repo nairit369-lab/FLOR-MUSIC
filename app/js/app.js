@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=14';
-import { player } from './player.js?v=14';
+import { I } from './icons.js?v=15';
+import { player } from './player.js?v=15';
 import {
   SOURCES, search as apiSearch, primeAudius, loadProxyConfig, homeWaveTracks,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=14';
+} from './api.js?v=15';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -215,6 +215,15 @@ function trackRow(track, idx, list, compact, ctx){
     ? `<span class="eq-mini"><i></i><i></i><i></i></span>`
     : `<span class="num">${idx + 1}</span><span class="play">${isCur ? I.pause : I.play}</span>`;
   const durText = track.isRadio ? 'LIVE' : fmt(track.duration);
+  const tactHtml = compact
+    ? `<div class="tact tact-compact">
+        <button class="addpl" title="В плейлист">${I.plus}</button>
+      </div>`
+    : `<div class="tact">
+        <button class="like ${isLiked ? 'on' : ''}" title="Нравится">${isLiked ? I.heartFill : I.heart}</button>
+        <button class="addpl" title="В плейлист">${I.plus}</button>
+        <button class="more" title="Ещё">${I.more}</button>
+      </div>`;
   r.innerHTML = `
     <div class="idx">${idxCell}</div>
     <div class="tcover ${gradClass(track)}">${coverImg(track)}</div>
@@ -224,11 +233,7 @@ function trackRow(track, idx, list, compact, ctx){
     </div>
     ${compact ? '' : `<div class="talbum">${esc(track.album || '')}</div>`}
     <div class="tdur">${durText}</div>
-    ${compact ? '' : `<div class="tact">
-      <button class="like ${isLiked ? 'on' : ''}" title="Нравится">${isLiked ? I.heartFill : I.heart}</button>
-      <button class="addpl" title="В плейлист">${I.plus}</button>
-      <button class="more" title="Ещё">${I.more}</button>
-    </div>`}`;
+    ${tactHtml}`;
   r._trackId = track.id;
   r.addEventListener('click', () => player.playQueue(list, idx));
   const lk = r.querySelector('.like');
@@ -1671,11 +1676,17 @@ function syncPlayerUI(){
     $('#npArtist').textContent = c.artist + (c.isRadio ? '' : (c.isFull ? '' : ' · превью'));
     const lk = $('#npLike'); const isL = liked.has(c.id);
     lk.className = 'np-like' + (isL ? ' on' : ''); lk.innerHTML = isL ? I.heartFill : I.heart;
+    const add = $('#npAdd');
+    if (add){
+      add.hidden = false;
+      add.innerHTML = I.plus;
+    }
   } else {
     cover.className = 'npc'; cover.innerHTML = '';
     $('#npTitle').textContent = 'Ничего не играет';
     $('#npArtist').textContent = 'Найдите трек для начала';
     $('#npLike').innerHTML = '';
+    const add = $('#npAdd'); if (add){ add.hidden = true; add.innerHTML = ''; }
   }
   $('#npPlay').innerHTML = player.playing ? I.pause : I.play;
   $('#npPlay').classList.toggle('loading', player.loading);
@@ -1733,6 +1744,14 @@ function syncFS(){
   const fsCover = $('#fsCover'); fsCover.className = 'fs-cover ' + gradClass(c); fsCover.innerHTML = coverImg(c);
   $('#fsTitle').textContent = c.title;
   $('#fsArtist').textContent = c.artist;
+  const fsLk = $('#fsLike');
+  if (fsLk){
+    const isL = liked.has(c.id);
+    fsLk.className = 'fs-like' + (isL ? ' on' : '');
+    fsLk.innerHTML = isL ? I.heartFill : I.heart;
+  }
+  const fsAdd = $('#fsAdd');
+  if (fsAdd) fsAdd.innerHTML = I.plus;
   const amb = $('#fsAmbient'); amb.className = 'ambient ' + gradClass(c);
   amb.style.backgroundImage = c.artwork ? `url("${c.artwork}")` : '';
   $('#fsPlay').innerHTML = player.playing ? I.pause : I.play;
@@ -1861,6 +1880,7 @@ async function init(){
   $('#shuffleBtn').addEventListener('click', () => player.toggleShuffle());
   $('#repeatBtn').addEventListener('click', () => player.cycleRepeat());
   $('#npLike').addEventListener('click', () => { if (player.current) toggleLike(player.current); });
+  $('#npAdd').addEventListener('click', () => { if (player.current) quickAddToPlaylist(player.current, $('#npAdd')); });
   $('#expandBtn').addEventListener('click', openFS);
   $('#npCover').addEventListener('click', openFS);
   document.querySelector('.np-left .npmeta')?.addEventListener('click', () => { if (window.matchMedia('(max-width: 760px)').matches && player.current) openFS(); });
@@ -1877,6 +1897,8 @@ async function init(){
   $('#fsNext').addEventListener('click', () => player.next());
   $('#fsShuffle').addEventListener('click', () => player.toggleShuffle());
   $('#fsRepeat').addEventListener('click', () => player.cycleRepeat());
+  $('#fsLike').addEventListener('click', () => { if (player.current) toggleLike(player.current); });
+  $('#fsAdd').addEventListener('click', () => { if (player.current) quickAddToPlaylist(player.current, $('#fsAdd')); });
   $$('.fs-rtabs button').forEach(b => b.addEventListener('click', () => {
     $$('.fs-rtabs button').forEach(x => x.classList.remove('on'));
     b.classList.add('on');

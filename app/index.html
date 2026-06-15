@@ -14,8 +14,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="FLOR MUSIC">
 <meta name="format-detection" content="telephone=no">
-<link rel="stylesheet" href="styles.css?v=14">
-<link rel="stylesheet" href="mobile.css?v=14">
+<link rel="stylesheet" href="styles.css?v=15">
+<link rel="stylesheet" href="mobile.css?v=15">
 </head>
 <body>
 <div class="app" id="app">
@@ -93,6 +93,7 @@
         <div class="a" id="npArtist">Найдите трек для начала</div>
       </div>
       <button class="np-like" id="npLike"></button>
+      <button class="np-addpl" id="npAdd" title="В плейлист" hidden></button>
     </div>
 
     <div class="np-center">
@@ -147,6 +148,10 @@
     <div class="fs-trackinfo">
       <div class="tt" id="fsTitle">—</div>
       <div class="ta" id="fsArtist">—</div>
+      <div class="fs-track-actions">
+        <button class="fs-like" id="fsLike" title="В любимое"></button>
+        <button class="fs-addpl" id="fsAdd" title="В плейлист"></button>
+      </div>
     </div>
     <div class="fs-progress">
       <div class="bar" id="fsBar"><div class="fill" id="fsFill"></div><div class="knob" id="fsKnob"></div></div>
@@ -188,6 +193,6 @@
   <div class="modal" id="modalBox"></div>
 </div>
 
-<script type="module" src="js/app.js?v=14"></script>
+<script type="module" src="js/app.js?v=15"></script>
 </body>
 </html>

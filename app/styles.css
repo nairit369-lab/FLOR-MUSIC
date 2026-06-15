@@ -345,8 +345,12 @@ input{ font-family: inherit; }
 .track .tinfo .ta{ font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .track .talbum{ font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .track .tdur{ font-size:13.5px; text-align:right; font-variant-numeric: tabular-nums; }
-.track .tact{ display:flex; gap:6px; justify-content:flex-end; opacity:0; transition:.15s var(--ease); }
-.track:hover .tact{ opacity:1; }
+.track .tact{ display:flex; gap:6px; justify-content:flex-end; opacity:1; transition:.15s var(--ease); }
+.track .tact .like, .track .tact .more{ opacity:0; transition:.15s var(--ease); }
+.track:hover .tact .like, .track:hover .tact .more{ opacity:1; }
+@media (hover:none){
+  .track .tact .like, .track .tact .more{ opacity:1; }
+}
 .track .tact button{ width:30px;height:30px;border-radius:50%; display:grid;place-items:center; color:var(--text-3); }
 .track .tact button:hover{ color: var(--text); background: var(--hover); }
 .track .tact svg{ width:17px; height:17px; }
@@ -475,10 +479,13 @@ input{ font-family: inherit; }
 .np-left .npmeta{ min-width:0; }
 .np-left .npmeta .t{ font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .np-left .npmeta .a{ font-size:13px; color: var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.np-like{ width:36px;height:36px;border-radius:50%; display:grid; place-items:center; color:var(--text-3); flex:none; }
+.np-like{ width:36px;height:36px;border-radius:50%; display:grid; place-items:center; color:var(--text-3); flex:none; border:none; background:transparent; cursor:pointer; }
 .np-like:hover{ color: var(--text); }
 .np-like.on{ color: var(--accent); }
 .np-like svg{ width:19px; height:19px; }
+.np-addpl{ width:36px;height:36px;border-radius:50%; display:grid; place-items:center; color:var(--accent-2); background:var(--accent-soft); flex:none; border:none; cursor:pointer; transition:.15s var(--ease); }
+.np-addpl:hover{ color:#fff; background:var(--accent); }
+.np-addpl svg{ width:19px; height:19px; }
 
 .np-center{ display:flex; flex-direction:column; align-items:center; gap:9px; width: 520px; max-width: 40vw; }
 .np-controls{ display:flex; align-items:center; gap:20px; }
@@ -524,6 +531,14 @@ input{ font-family: inherit; }
 .fs-trackinfo{ width: min(40vh,400px); margin-top: 28px; }
 .fs-trackinfo .tt{ font-size: clamp(24px,3.4vh,34px); font-weight:800; letter-spacing:-0.03em; }
 .fs-trackinfo .ta{ font-size: 18px; color: var(--text-2); margin-top:6px; }
+.fs-track-actions{ display:flex; align-items:center; justify-content:center; gap:14px; margin-top:18px; }
+.fs-like, .fs-addpl{ width:44px; height:44px; border-radius:50%; display:grid; place-items:center; border:none; cursor:pointer; transition:.15s var(--ease); }
+.fs-like{ color:var(--text-3); background:var(--surface-3); }
+.fs-like.on{ color:var(--accent); }
+.fs-like svg{ width:22px; height:22px; }
+.fs-addpl{ color:var(--accent-2); background:var(--accent-soft); }
+.fs-addpl:hover{ color:#fff; background:var(--accent); }
+.fs-addpl svg{ width:22px; height:22px; }
 .fs-progress{ width: min(40vh,400px); margin-top: 22px; }
 .fs-progress .bar{ height:6px; }
 .fs-times{ display:flex; justify-content:space-between; margin-top:10px; font-size:13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
