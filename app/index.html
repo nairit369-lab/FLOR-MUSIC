@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FLOR MUSIC — поиск и прослушивание музыки</title>
+<meta name="description" content="FLOR MUSIC — бесплатный музыкальный плеер: поиск и прослушивание треков через Audius и iTunes.">
+<link rel="icon" href="assets/flor-logo.png">
+<link rel="apple-touch-icon" href="assets/flor-logo.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0C0814">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FLOR MUSIC">
+<link rel="stylesheet" href="styles.css?v=6">
+<link rel="stylesheet" href="mobile.css?v=6">
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ===== Sidebar ===== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark" id="brandMark"></div>
+      <div class="word">FL<b>OR</b></div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-item active" data-screen="home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/></svg>
+        <span>Главная</span>
+      </div>
+      <div class="nav-item" data-screen="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span>Поиск</span>
+      </div>
+      <div class="nav-item" data-screen="library">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5v15"/><path d="M9 4v16"/><rect x="13" y="5" width="7" height="15" rx="1.5" transform="rotate(-12 16 12)"/></svg>
+        <span>Моя медиатека</span>
+      </div>
+    </nav>
+
+    <div class="side-sep"></div>
+    <div class="side-label">Плейлисты</div>
+    <div class="playlists scroll" id="sidePlaylists"></div>
+
+    <div class="side-cta" id="createPlaylist">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      <span>Создать плейлист</span>
+    </div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <main class="main">
+    <header class="topbar">
+      <div class="tb-brand">FL<b>OR</b></div>
+      <div class="tb-nav">
+        <button class="icon-btn" id="collapseBtn" title="Свернуть меню">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+      </div>
+      <div class="searchbar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="topSearch" placeholder="Поиск трека или исполнителя">
+      </div>
+      <div class="tb-spacer"></div>
+      <div class="theme-toggle">
+        <button id="tgLight" title="Светлая тема"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg></button>
+        <button id="tgDark" title="Тёмная тема"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+      </div>
+      <div class="notif-wrap">
+        <button class="icon-btn" id="notifBtn" title="Уведомления">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+          <span class="notif-dot" id="notifDot" hidden></span>
+        </button>
+      </div>
+      <div class="avatar" id="avatar">F</div>
+    </header>
+
+    <div class="content scroll">
+      <div class="content-inner" id="screens"></div>
+    </div>
+  </main>
+
+  <!-- ===== Now playing bar ===== -->
+  <footer class="player">
+    <div class="np-left">
+      <div class="npc" id="npCover"></div>
+      <div class="npmeta">
+        <div class="t" id="npTitle">Ничего не играет</div>
+        <div class="a" id="npArtist">Найдите трек для начала</div>
+      </div>
+      <button class="np-like" id="npLike"></button>
+    </div>
+
+    <div class="np-center">
+      <div class="np-controls">
+        <button class="sm" id="shuffleBtn" title="Перемешать"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg></button>
+        <button class="sm" id="npPrev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5a1 1 0 0 1 2 0v5.2l9.5-5.5A1 1 0 0 1 19 5.6v12.8a1 1 0 0 1-1.5.87L8 13.8V19a1 1 0 0 1-2 0z"/></svg></button>
+        <button class="np-play" id="npPlay"></button>
+        <button class="sm" id="npNext"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 5a1 1 0 0 0-2 0v5.2L6.5 4.7A1 1 0 0 0 5 5.6v12.8a1 1 0 0 0 1.5.87L16 13.8V19a1 1 0 0 0 2 0z"/></svg></button>
+        <button class="sm" id="repeatBtn" title="Повтор"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></button>
+      </div>
+      <div class="np-progress">
+        <span class="tm" id="npCur">0:00</span>
+        <div class="bar" id="npBar"><div class="fill" id="npFill"></div><div class="knob" id="npKnob"></div></div>
+        <span class="tm r" id="npTot">0:00</span>
+      </div>
+    </div>
+
+    <div class="np-right">
+      <button id="queueBtn" title="Очередь"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h13M3 12h13M3 18h9"/><circle cx="19" cy="17" r="2.5"/><path d="M21.5 17V9l-3 1"/></svg></button>
+      <div class="vol">
+        <button id="volBtn" title="Громкость"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M19 6a8 8 0 0 1 0 12"/></svg></button>
+        <div class="bar" id="volBar"><div class="fill" id="volFill"></div><div class="knob" id="volKnob"></div></div>
+      </div>
+      <button class="expand-btn" id="expandBtn" title="Во весь экран"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>
+    </div>
+  </footer>
+
+  <!-- ===== Mobile bottom tab bar ===== -->
+  <nav class="mtabs" id="mtabs">
+    <button class="mtab" data-screen="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/></svg>
+      <span>Главная</span>
+    </button>
+    <button class="mtab" data-screen="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <span>Поиск</span>
+    </button>
+    <button class="mtab" data-screen="library">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5v15"/><path d="M9 4v16"/><rect x="13" y="5" width="7" height="15" rx="1.5" transform="rotate(-12 16 12)"/></svg>
+      <span>Медиатека</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ===== Fullscreen player ===== -->
+<div class="fsplayer" id="fsplayer">
+  <div class="ambient" id="fsAmbient"></div>
+  <button class="fs-close" id="fsClose" title="Свернуть плеер"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+
+  <div class="fs-left">
+    <div class="fs-cover" id="fsCover"></div>
+    <div class="fs-trackinfo">
+      <div class="tt" id="fsTitle">—</div>
+      <div class="ta" id="fsArtist">—</div>
+    </div>
+    <div class="fs-progress">
+      <div class="bar" id="fsBar"><div class="fill" id="fsFill"></div><div class="knob" id="fsKnob"></div></div>
+      <div class="fs-times"><span id="fsCur">0:00</span><span id="fsTot">0:00</span></div>
+    </div>
+    <div class="fs-controls">
+      <button id="fsShuffle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg></button>
+      <button id="fsPrev"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5a1 1 0 0 1 2 0v5.2l9.5-5.5A1 1 0 0 1 19 5.6v12.8a1 1 0 0 1-1.5.87L8 13.8V19a1 1 0 0 1-2 0z"/></svg></button>
+      <button class="fs-play" id="fsPlay"></button>
+      <button id="fsNext"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 5a1 1 0 0 0-2 0v5.2L6.5 4.7A1 1 0 0 0 5 5.6v12.8a1 1 0 0 0 1.5.87L16 13.8V19a1 1 0 0 0 2 0z"/></svg></button>
+      <button id="fsRepeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></button>
+    </div>
+  </div>
+
+  <div class="fs-right">
+    <div class="fs-rtabs">
+      <button class="on" data-tab="queue">Очередь</button>
+      <button data-tab="info">О треке</button>
+    </div>
+    <div class="fs-queue scroll" id="fsQueue"></div>
+    <div class="lyrics scroll" id="fsInfo" style="display:none;flex:1;overflow-y:auto"></div>
+  </div>
+</div>
+
+<!-- Notifications panel (lives at body level so it shows on mobile too,
+     where the desktop topbar is hidden) -->
+<div class="notif-panel" id="notifPanel" hidden></div>
+
+<div class="toasts" id="toasts"></div>
+
+<!-- ===== Hidden YouTube playback engine (audio only) ===== -->
+<div id="ytplayer-wrap"><div id="ytplayer"></div></div>
+
+<!-- ===== Context menu (track actions) ===== -->
+<div class="ctx-menu" id="ctxMenu" hidden></div>
+
+<!-- ===== Modal (auth / create playlist) ===== -->
+<div class="modal-overlay" id="modal" hidden>
+  <div class="modal" id="modalBox"></div>
+</div>
+
+<script type="module" src="js/app.js?v=6"></script>
+</body>
+</html>

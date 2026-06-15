@@ -1,0 +1,573 @@
+/* Minimal zero-dependency static server for FLOR MUSIC.
+   Usage: node server.mjs  (then open http://localhost:5173) */
+import http from 'node:http';
+import { readFile, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { extname, join, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+import { Readable } from 'node:stream';
+import crypto from 'node:crypto';
+import os from 'node:os';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(__dirname, 'app');
+const START_PORT = Number(process.env.PORT) || 5173;
+
+/* ============================================================
+   Accounts — stored server-side in users.json so the SAME login
+   works from any device that connects to this server (PC, phone…).
+   ============================================================ */
+const USERS_FILE = join(__dirname, 'users.json');
+const AVATARS_DIR = join(__dirname, 'avatars');
+function avatarFile(email){ return join(AVATARS_DIR, crypto.createHash('sha256').update(email).digest('hex') + '.jpg'); }
+let users = {};
+try { users = JSON.parse(readFileSync(USERS_FILE, 'utf8')) || {}; } catch { users = {}; }
+async function saveUsers(){ try { await writeFile(USERS_FILE, JSON.stringify(users, null, 2)); } catch (e){ console.error('users.json save failed:', e.message); } }
+function hashPass(pass, salt){
+  salt = salt || crypto.randomBytes(8).toString('hex');
+  const h = crypto.scryptSync(String(pass), salt, 32).toString('hex');
+  return salt + ':' + h;
+}
+function verifyPass(pass, stored){
+  if (!stored || !stored.includes(':')) return false;
+  const [salt] = stored.split(':');
+  return crypto.timingSafeEqual(Buffer.from(hashPass(pass, salt)), Buffer.from(stored));
+}
+function readBody(req){
+  return new Promise((resolve) => {
+    let data = '';
+    req.on('data', c => { data += c; if (data.length > 1e5) req.destroy(); });
+    req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { resolve({}); } });
+    req.on('error', () => resolve({}));
+  });
+}
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/* ============================================================
+   Email delivery (for login codes & password reset).
+   Config is read from env vars or an optional email-config.json
+   file next to this server. Supported free providers: Brevo, Resend.
+   If nothing is configured, codes are printed to the console so the
+   flow still works for local testing.
+   ============================================================ */
+let emailCfg = {};
+try { emailCfg = JSON.parse(readFileSync(join(__dirname, 'email-config.json'), 'utf8')) || {}; } catch { emailCfg = {}; }
+const EMAIL = {
+  brevoKey: process.env.BREVO_API_KEY || emailCfg.brevoKey || '',
+  resendKey: process.env.RESEND_API_KEY || emailCfg.resendKey || '',
+  from: process.env.EMAIL_FROM || emailCfg.from || '',
+  fromName: process.env.EMAIL_FROM_NAME || emailCfg.fromName || 'FLOR MUSIC',
+};
+
+async function sendEmail(to, subject, html, textCode){
+  // No provider configured → log to console so local testing works.
+  if (!EMAIL.brevoKey && !EMAIL.resendKey){
+    console.log(`\n  [EMAIL → ${to}] ${subject}\n  Код: ${textCode || '(см. письмо)'}\n`);
+    return { ok: true, dev: true };
+  }
+  try {
+    if (EMAIL.brevoKey){
+      const r = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'api-key': EMAIL.brevoKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({
+          sender: { email: EMAIL.from, name: EMAIL.fromName },
+          to: [{ email: to }], subject, htmlContent: html,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok){ const t = await r.text().catch(() => ''); console.error('Brevo send failed', r.status, t); return { ok: false }; }
+      return { ok: true };
+    }
+    // Resend
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + EMAIL.resendKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: `${EMAIL.fromName} <${EMAIL.from}>`, to: [to], subject, html }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok){ const t = await r.text().catch(() => ''); console.error('Resend send failed', r.status, t); return { ok: false }; }
+    return { ok: true };
+  } catch (e){ console.error('sendEmail error', e.message); return { ok: false }; }
+}
+const emailConfigured = () => !!(EMAIL.brevoKey || EMAIL.resendKey);
+
+/* one-time codes: key `${purpose}:${email}` -> { code, exp, tries } */
+const codes = new Map();
+const pendingReg = new Map();   // email -> { name, pass(hash), exp }
+const CODE_TTL = 10 * 60 * 1000;
+function genCode(){ return String(Math.floor(100000 + Math.random() * 900000)); }
+function putCode(purpose, email){
+  const code = genCode();
+  codes.set(purpose + ':' + email, { code, exp: Date.now() + CODE_TTL, tries: 0 });
+  return code;
+}
+function checkCode(purpose, email, code){
+  const key = purpose + ':' + email;
+  const rec = codes.get(key);
+  if (!rec) return false;
+  if (Date.now() > rec.exp){ codes.delete(key); return false; }
+  if (rec.tries++ > 6){ codes.delete(key); return false; }
+  if (rec.code !== String(code || '').trim()) return false;
+  codes.delete(key);
+  return true;
+}
+function codeEmailHtml(code, action){
+  return `<div style="font-family:Arial,sans-serif;max-width:440px;margin:auto">
+    <h2 style="color:#6C3CE0">FLOR MUSIC</h2>
+    <p>Ваш код для ${action}:</p>
+    <div style="font-size:34px;font-weight:800;letter-spacing:8px;color:#1A1426">${code}</div>
+    <p style="color:#888;font-size:13px">Код действует 10 минут. Если вы это не запрашивали — проигнорируйте письмо.</p>
+  </div>`;
+}
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js':   'text/javascript; charset=utf-8',
+  '.mjs':  'text/javascript; charset=utf-8',
+  '.css':  'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.png':  'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.svg':  'image/svg+xml', '.ico': 'image/x-icon', '.webp': 'image/webp',
+};
+
+const server = http.createServer(async (req, res) => {
+  const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+
+  // ---- API: health check (client uses this to detect server reachability) ----
+  if (urlPath === '/api/health'){
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ ok: true }));
+  }
+
+  // ---- API: user avatar (GET) ----
+  if (urlPath === '/api/auth/avatar' && req.method === 'GET'){
+    const email = (new URL(req.url, 'http://x').searchParams.get('email') || '').trim().toLowerCase();
+    const u = users[email];
+    if (!u?.hasAvatar) { res.writeHead(404); return res.end(); }
+    try {
+      const data = await readFile(avatarFile(email));
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=3600' });
+      return res.end(data);
+    } catch { res.writeHead(404); return res.end(); }
+  }
+
+  // ---- API: accounts (shared across devices) ----
+  if (urlPath.startsWith('/api/auth/') && req.method === 'POST'){
+    const b = await readBody(req);
+    const email = String(b.email || '').trim().toLowerCase();
+    const pass = String(b.pass || '');
+    const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
+    const userOut = (u, em) => {
+      const e = em || u.email || email;
+      return { name: u.name, email: e, avatar: u.hasAvatar ? `/api/auth/avatar?email=${encodeURIComponent(e)}&t=${u.avatarAt || 0}` : null };
+    };
+
+    // 1) Start registration → store pending + email a confirmation code.
+    if (urlPath === '/api/auth/register'){
+      const name = String(b.name || '').trim();
+      if (!EMAIL_RE.test(email)) return json(400, { error: 'Некорректный email' });
+      if (pass.length < 4) return json(400, { error: 'Пароль слишком короткий (мин. 4 символа)' });
+      if (users[email]) return json(409, { error: 'Аккаунт с таким email уже существует' });
+      pendingReg.set(email, { name: name || email.split('@')[0], pass: hashPass(pass), exp: Date.now() + CODE_TTL });
+      const code = putCode('register', email);
+      const r = await sendEmail(email, 'Код подтверждения FLOR MUSIC', codeEmailHtml(code, 'подтверждения регистрации'), code);
+      return json(200, { ok: true, step: 'verify', emailed: !r.dev, devCode: r.dev ? code : undefined });
+    }
+
+    // 2) Confirm registration with the code.
+    if (urlPath === '/api/auth/register/verify'){
+      const p = pendingReg.get(email);
+      if (!p || Date.now() > p.exp){ pendingReg.delete(email); return json(400, { error: 'Срок кода истёк, начните заново' }); }
+      if (!checkCode('register', email, b.code)) return json(401, { error: 'Неверный код' });
+      users[email] = { name: p.name, email, pass: p.pass, createdAt: Date.now() };
+      pendingReg.delete(email); await saveUsers();
+      return json(200, { ok: true, user: userOut(users[email], email) });
+    }
+
+    // 3) Password login.
+    if (urlPath === '/api/auth/login'){
+      const u = users[email];
+      if (!u || !verifyPass(pass, u.pass)) return json(401, { error: 'Неверный email или пароль' });
+      return json(200, { ok: true, user: userOut(u, email) });
+    }
+
+    // 3b) Change password (logged-in user).
+    if (urlPath === '/api/auth/password'){
+      const u = users[email];
+      const oldPass = String(b.oldPass || '');
+      const newPass = String(b.newPass || '');
+      if (!u || !verifyPass(oldPass, u.pass)) return json(401, { error: 'Неверный текущий пароль' });
+      if (newPass.length < 4) return json(400, { error: 'Новый пароль слишком короткий (мин. 4 символа)' });
+      u.pass = hashPass(newPass); await saveUsers();
+      return json(200, { ok: true });
+    }
+
+    // 3c) Upload avatar (base64 JPEG, max ~400 KB).
+    if (urlPath === '/api/auth/avatar'){
+      const u = users[email];
+      if (!u || !verifyPass(pass, u.pass)) return json(401, { error: 'Неверный пароль' });
+      const raw = String(b.avatar || '');
+      const m = raw.match(/^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/i);
+      if (!m) return json(400, { error: 'Некорректное изображение' });
+      const buf = Buffer.from(m[2], 'base64');
+      if (buf.length > 400000) return json(400, { error: 'Файл слишком большой (макс. 400 КБ)' });
+      try {
+        const { mkdir } = await import('node:fs/promises');
+        await mkdir(AVATARS_DIR, { recursive: true });
+        await writeFile(avatarFile(email), buf);
+        u.hasAvatar = true; u.avatarAt = Date.now(); await saveUsers();
+        return json(200, { ok: true, user: userOut(u, email) });
+      } catch (e){ return json(500, { error: 'Не удалось сохранить аватар' }); }
+    }
+
+    // 4) Request a one-time code for passwordless login OR password reset.
+    if (urlPath === '/api/auth/code'){
+      const purpose = b.purpose === 'reset' ? 'reset' : 'login';
+      if (!users[email]) return json(404, { error: 'Аккаунт с таким email не найден' });
+      const code = putCode(purpose, email);
+      const action = purpose === 'reset' ? 'сброса пароля' : 'входа';
+      const r = await sendEmail(email, 'Код FLOR MUSIC', codeEmailHtml(code, action), code);
+      return json(200, { ok: true, emailed: !r.dev, devCode: r.dev ? code : undefined });
+    }
+
+    // 5) Verify passwordless-login code.
+    if (urlPath === '/api/auth/code/verify'){
+      if (!checkCode('login', email, b.code)) return json(401, { error: 'Неверный или просроченный код' });
+      const u = users[email];
+      if (!u) return json(404, { error: 'Аккаунт не найден' });
+      return json(200, { ok: true, user: userOut(u, email) });
+    }
+
+    // 6) Reset password with a code.
+    if (urlPath === '/api/auth/reset'){
+      if (pass.length < 4) return json(400, { error: 'Пароль слишком короткий (мин. 4 символа)' });
+      if (!checkCode('reset', email, b.code)) return json(401, { error: 'Неверный или просроченный код' });
+      const u = users[email];
+      if (!u) return json(404, { error: 'Аккаунт не найден' });
+      u.pass = hashPass(pass); await saveUsers();
+      return json(200, { ok: true, user: userOut(u, email) });
+    }
+
+    return json(404, { error: 'Неизвестный метод' });
+  }
+
+  // ---- API: YouTube search (server-side, no key, no CORS) ----
+  if (urlPath === '/api/yt/search'){
+    try {
+      const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
+      const items = await ytSearch(q);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ items }));
+    } catch (e){
+      res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ items: [], error: e.message }));
+    }
+  }
+
+  // ---- API: YouTube AUDIO stream (proxied) ----
+  // YouTube video/googlevideo is throttled or blocked by some ISPs (e.g. in RU),
+  // and the IFrame player then shows "video unavailable". We instead resolve an
+  // audio-only stream through a foreign Piped instance and pipe it through this
+  // server, so the browser only ever talks to localhost + a non-Google host.
+  if (urlPath === '/api/yt/audio'){
+    try {
+      const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
+      if (!/^[\w-]{6,20}$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      const audioUrl = await ytAudioUrl(id);
+      if (!audioUrl){ res.writeHead(502); return res.end('no audio'); }
+      const headers = { 'User-Agent': 'Mozilla/5.0' };
+      if (req.headers.range) headers['Range'] = req.headers.range;
+      const up = await fetch(audioUrl, { headers });
+      const h = { 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
+      const ct = up.headers.get('content-type'); if (ct) h['Content-Type'] = ct;
+      const cl = up.headers.get('content-length'); if (cl) h['Content-Length'] = cl;
+      const cr = up.headers.get('content-range'); if (cr) h['Content-Range'] = cr;
+      res.writeHead(up.status, h);
+      if (up.body) Readable.fromWeb(up.body).pipe(res); else res.end();
+    } catch (e){
+      if (!res.headersSent) res.writeHead(502);
+      res.end('audio error');
+    }
+    return;
+  }
+
+  // ---- API: SoundCloud search ----
+  if (urlPath === '/api/sc/search'){
+    try {
+      const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
+      const items = await scSearch(q);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ items }));
+    } catch (e){
+      res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ items: [], error: e.message }));
+    }
+  }
+
+  // ---- API: SoundCloud stream (resolve + redirect to media) ----
+  if (urlPath === '/api/sc/stream'){
+    try {
+      const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
+      if (!/^\d+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      const media = await scStreamUrl(id);
+      if (!media){ res.writeHead(502); return res.end('no stream'); }
+      res.writeHead(302, { Location: media, 'Cache-Control': 'no-store' });
+      return res.end();
+    } catch (e){
+      if (!res.headersSent) res.writeHead(502);
+      return res.end('stream error');
+    }
+  }
+
+  // ---- API: image proxy (same-origin, so the client can crop artwork to a
+  //      square on a <canvas> without CORS tainting → fixes the iPhone player
+  //      showing covers with black side bars) ----
+  if (urlPath === '/api/img'){
+    try {
+      const u = new URL(req.url, 'http://x').searchParams.get('u') || '';
+      if (!/^https?:\/\//i.test(u)){ res.writeHead(400); return res.end('bad url'); }
+      const up = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000) });
+      const ct = up.headers.get('content-type') || 'image/jpeg';
+      if (!/^image\//.test(ct)){ res.writeHead(415); return res.end('not image'); }
+      const buf = Buffer.from(await up.arrayBuffer());
+      res.writeHead(up.status, { 'Content-Type': ct, 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': '*' });
+      return res.end(buf);
+    } catch {
+      if (!res.headersSent) res.writeHead(502);
+      return res.end('img error');
+    }
+  }
+
+  // ---- Static files ----
+  try {
+    let p = urlPath === '/' ? '/index.html' : urlPath;
+    const filePath = normalize(join(ROOT, p));
+    if (!filePath.startsWith(ROOT)) { res.writeHead(403); return res.end('Forbidden'); }
+    const data = await readFile(filePath);
+    // No caching for app files so edits always reach the browser on reload.
+    res.writeHead(200, {
+      'Content-Type': MIME[extname(filePath)] || 'application/octet-stream',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    });
+    res.end(data);
+  } catch {
+    res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end('<h1>404</h1>');
+  }
+});
+
+/* ============================================================
+   YouTube search by scraping the public results page.
+   No API key, no quota, no payment — runs server-side so there
+   are no CORS issues. Results are cached briefly in memory.
+   ============================================================ */
+const ytCache = new Map();   // q -> { at, items }
+const YT_TTL = 5 * 60 * 1000;
+
+function parseDuration(text){
+  if (!text) return 0;
+  const parts = text.split(':').map(Number);
+  if (parts.some(isNaN)) return 0;
+  return parts.reduce((a, n) => a * 60 + n, 0);
+}
+
+async function ytSearch(q){
+  q = (q || '').trim();
+  if (!q) return [];
+  const cached = ytCache.get(q);
+  if (cached && Date.now() - cached.at < YT_TTL) return cached.items;
+
+  const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}&hl=en&gl=US`;
+  const r = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cookie': 'CONSENT=YES+1; SOCS=CAI;',
+    },
+  });
+  const html = await r.text();
+  const m = html.match(/var ytInitialData = (\{.*?\});<\/script>/s) || html.match(/ytInitialData = (\{.*?\});/s);
+  if (!m) return [];
+
+  let data; try { data = JSON.parse(m[1]); } catch { return []; }
+  const sections = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+  const items = [];
+  for (const sec of sections){
+    const list = sec.itemSectionRenderer?.contents || [];
+    for (const it of list){
+      const v = it.videoRenderer;
+      if (!v || !v.videoId) continue;
+      const dur = parseDuration(v.lengthText?.simpleText);
+      if (!dur) continue;                       // skip live / no-duration entries
+      const thumbs = v.thumbnail?.thumbnails || [];
+      items.push({
+        id: v.videoId,
+        title: v.title?.runs?.[0]?.text || 'YouTube',
+        author: (v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || 'YouTube').replace(/ - Topic$/, ''),
+        duration: dur,
+        thumb: thumbs.length ? thumbs[thumbs.length - 1].url : `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
+      });
+      if (items.length >= 30) break;
+    }
+    if (items.length >= 30) break;
+  }
+  if (items.length) ytCache.set(q, { at: Date.now(), items });   // never cache empty/failed scrapes
+  return items;
+}
+
+/* ============================================================
+   Resolve a playable audio-only stream URL for a YouTube video
+   via public Piped instances (hosted abroad → not Google-blocked).
+   ============================================================ */
+const PIPED = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.leptons.xyz',
+  'https://pipedapi.reallyaweso.me',
+  'https://api.piped.private.coffee',
+  'https://pipedapi.drgns.space',
+];
+const audioCache = new Map();   // id -> { at, url }
+const AUDIO_TTL = 90 * 60 * 1000;
+
+async function pipedAudio(inst, id){
+  const r = await fetch(`${inst}/streams/${id}`, {
+    signal: AbortSignal.timeout(5000),
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+  });
+  if (!r.ok) throw new Error(inst + ' ' + r.status);
+  const j = await r.json();
+  const audios = (j.audioStreams || []).filter(a => a && a.url);
+  if (!audios.length) throw new Error(inst + ' no streams');
+  audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+  // Prefer an m4a/AAC stream around ≤160 kbps for broad <audio> compatibility.
+  const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
+  const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
+            || audios.find(isM4a)
+            || audios[0];
+  if (!pick?.url) throw new Error(inst + ' no url');
+  return pick.url;
+}
+
+async function ytAudioUrl(id){
+  const c = audioCache.get(id);
+  if (c && Date.now() - c.at < AUDIO_TTL) return c.url;
+  try {
+    // Race every instance — take the first that returns a usable stream.
+    const url = await Promise.any(PIPED.map(inst => pipedAudio(inst, id)));
+    if (url){ audioCache.set(id, { at: Date.now(), url }); return url; }
+  } catch {}
+  return null;
+}
+
+/* ============================================================
+   SoundCloud — public api-v2 with a scraped client_id.
+   Works in regions where YouTube is blocked; serves full tracks.
+   ============================================================ */
+const SC_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
+let scClientId = null, scClientIdAt = 0;
+const SC_CID_TTL = 6 * 60 * 60 * 1000;
+
+async function scGetClientId(){
+  if (scClientId && Date.now() - scClientIdAt < SC_CID_TTL) return scClientId;
+  const html = await (await fetch('https://soundcloud.com/', { headers: { 'User-Agent': SC_UA } })).text();
+  const scripts = [...html.matchAll(/<script[^>]+src="([^"]+\.js[^"]*)"/g)].map(m => m[1]);
+  // The client_id lives in one of the bundled scripts — newest are last.
+  for (const src of scripts.reverse()){
+    try {
+      const js = await (await fetch(src, { headers: { 'User-Agent': SC_UA }, signal: AbortSignal.timeout(6000) })).text();
+      const m = js.match(/client_id\s*[:=]\s*"([a-zA-Z0-9]{20,40})"/);
+      if (m){ scClientId = m[1]; scClientIdAt = Date.now(); return scClientId; }
+    } catch {}
+  }
+  return scClientId;   // may be a stale-but-valid id
+}
+
+function scArtwork(t){
+  const u = t.artwork_url || t.user?.avatar_url || '';
+  return u ? u.replace('-large.', '-t300x300.') : '';
+}
+
+async function scSearch(q){
+  q = (q || '').trim();
+  if (!q) return [];
+  const cid = await scGetClientId();
+  if (!cid) return [];
+  const url = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(q)}&limit=25&client_id=${cid}`;
+  const r = await fetch(url, { headers: { 'User-Agent': SC_UA }, signal: AbortSignal.timeout(8000) });
+  if (!r.ok) return [];
+  const j = await r.json();
+  const items = [];
+  for (const t of (j.collection || [])){
+    if (!t || t.kind !== 'track' || t.streamable === false) continue;
+    const hasProgressive = (t.media?.transcodings || []).some(x => x.format?.protocol === 'progressive');
+    if (!hasProgressive) continue;          // only keep tracks we can play via <audio>
+    items.push({
+      id: t.id,
+      title: t.title || 'SoundCloud',
+      author: t.user?.username || '',
+      duration: Math.round((t.duration || 0) / 1000),
+      thumb: scArtwork(t),
+    });
+    if (items.length >= 25) break;
+  }
+  return items;
+}
+
+async function scStreamUrl(trackId){
+  const cid = await scGetClientId();
+  if (!cid) return null;
+  const r = await fetch(`https://api-v2.soundcloud.com/tracks/${trackId}?client_id=${cid}`, {
+    headers: { 'User-Agent': SC_UA }, signal: AbortSignal.timeout(8000),
+  });
+  if (!r.ok) return null;
+  const t = await r.json();
+  const trans = t.media?.transcodings || [];
+  const prog = trans.find(x => x.format?.protocol === 'progressive') || trans[0];
+  if (!prog?.url) return null;
+  const rr = await fetch(`${prog.url}?client_id=${cid}`, {
+    headers: { 'User-Agent': SC_UA }, signal: AbortSignal.timeout(8000),
+  });
+  if (!rr.ok) return null;
+  const jj = await rr.json();
+  return jj.url || null;
+}
+
+// If the chosen port is busy, automatically try the next ones so the
+// server never crashes with a confusing EADDRINUSE stack trace.
+function lanUrls(port){
+  const urls = [];
+  for (const ifaces of Object.values(os.networkInterfaces())){
+    for (const i of ifaces || []){
+      if (i.family === 'IPv4' && !i.internal) urls.push(`http://${i.address}:${port}`);
+    }
+  }
+  return [...new Set(urls)];
+}
+
+function listen(port, attemptsLeft = 10){
+  server.once('error', (err) => {
+    if (err.code === 'EADDRINUSE' && attemptsLeft > 0){
+      console.log(`  Порт ${port} занят, пробую ${port + 1}…`);
+      listen(port + 1, attemptsLeft - 1);
+    } else {
+      console.error('  Не удалось запустить сервер:', err.message);
+      process.exit(1);
+    }
+  });
+  // 0.0.0.0 — доступ с телефона/других устройств в той же сети.
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`\n  FLOR MUSIC → http://localhost:${port}`);
+    const lan = lanUrls(port);
+    if (lan.length){
+      console.log('  С телефона откройте один из адресов:');
+      lan.forEach(u => console.log('   ', u));
+    }
+    console.log('  (остановить: Ctrl+C)\n');
+  });
+}
+
+listen(START_PORT);

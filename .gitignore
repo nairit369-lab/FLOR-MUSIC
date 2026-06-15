@@ -1,0 +1,32 @@
+# Секреты и данные сервера (только на VDS, не в Git)
+email-config.json
+users.json
+avatars/
+
+# Зависимости
+node_modules/
+
+# Переменные окружения
+.env
+.env.*
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / редактор
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Логи и временные файлы
+*.log
+npm-debug.log*
+.cache/
+
+# Архивы и черновики (не нужны для деплоя)
+*.zip
+design_extracted/
+design_v2/

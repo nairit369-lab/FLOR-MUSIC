@@ -1,0 +1,12 @@
+{
+  "name": "flor-music",
+  "version": "1.0.0",
+  "description": "FLOR MUSIC — бесплатный музыкальный плеер: поиск и прослушивание музыки через Audius и iTunes (без ключей и подписок).",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs"
+  },
+  "keywords": ["music", "player", "audius", "itunes", "web-app"],
+  "license": "MIT"
+}

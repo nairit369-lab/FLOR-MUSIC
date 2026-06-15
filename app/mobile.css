@@ -1,0 +1,228 @@
+/* ============================================================
+   FLOR MUSIC — Mobile UI (faithful to mobile-app.jsx design)
+   Activates on screens <= 760px. Desktop layout untouched above.
+   ============================================================ */
+
+.mscreen{ display:none; }
+
+@media (max-width: 760px){
+  /* ---- shell: hide desktop chrome, single column ---- */
+  .app{ display:block; height:100dvh; padding:0; gap:0; }
+  .sidebar, .topbar{ display:none !important; }
+  .main{ height:100dvh; border:none; border-radius:0; display:flex; flex-direction:column; min-height:0; }
+  .content{ flex:1; min-height:0; overflow-y:auto; padding:0; border-radius:0; }
+  .content-inner{ padding-bottom:176px; }
+
+  /* desktop screen renderers are replaced by .mscreen on mobile */
+  .screen > :not(.mscreen){ }
+  .mscreen{ display:block; padding:16px 20px 0; }
+
+  .mscroll{ scrollbar-width:none; -ms-overflow-style:none; }
+  .mscroll::-webkit-scrollbar{ width:0; height:0; display:none; }
+
+  /* icon helper */
+  .mscreen .ic{ display:inline-flex; align-items:center; justify-content:center; flex:none; }
+  .mscreen .ic svg{ width:100%; height:100%; display:block; }
+
+  /* covers (gradient base from .cvN + real artwork overlay) */
+  .mscreen .cv{ position:relative; overflow:hidden; background-size:cover; background-position:center; flex:none; }
+  .mscreen .cv img.cover-img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; border-radius:inherit; opacity:0; transition:opacity .35s var(--ease); }
+  .mscreen .cv img.cover-img.loaded{ opacity:1; }
+
+  /* ---- screen header ---- */
+  .m-top{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }
+  .m-greet{ font-size:25px; font-weight:800; letter-spacing:-.02em; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .m-h1{ font-size:30px; font-weight:800; letter-spacing:-.02em; color:var(--text); margin-bottom:16px; }
+  .m-acts{ display:flex; align-items:center; gap:10px; flex:none; }
+  .m-ibtn{ position:relative; width:38px; height:38px; border-radius:50%; background:var(--surface-3); display:grid; place-items:center; color:var(--text-2); border:none; cursor:pointer; }
+  .m-ibtn .ic{ width:20px; height:20px; }
+  .m-av{ width:38px; height:38px; border-radius:50%; background:var(--accent-grad); display:grid; place-items:center; color:#fff; font-weight:700; cursor:pointer; flex:none; overflow:hidden; }
+  .m-prof-av{ cursor:pointer; overflow:hidden; }
+  .m-dot{ position:absolute; top:8px; right:9px; width:8px; height:8px; border-radius:50%; background:#FF5A7A; border:2px solid var(--surface-3); }
+
+  /* ---- hero wave card ---- */
+  .m-hero{ position:relative; border-radius:22px; padding:22px; margin-bottom:22px; overflow:hidden;
+    background:linear-gradient(125deg,#3A1C8C,#6C3CE0 55%,#9D5BE0); color:#fff; }
+  .m-hero::before{ content:''; position:absolute; inset:0; background:radial-gradient(300px 160px at 90% 0%, rgba(255,255,255,.22), transparent 60%); }
+  .m-hero > *{ position:relative; }
+  .m-hero .eyebrow{ font-size:11px; font-weight:700; letter-spacing:.12em; opacity:.85; }
+  .m-hero h1{ font-size:30px; font-weight:800; letter-spacing:-.03em; margin-top:6px; }
+  .m-hero p{ font-size:13.5px; opacity:.88; margin-top:6px; line-height:1.4; }
+  .m-hero .hrow{ display:flex; gap:10px; margin-top:18px; }
+  .m-hbtn{ border:none; border-radius:999px; padding:11px 20px; font-weight:700; font-size:14px; font-family:inherit;
+    display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+  .m-hbtn .ic{ width:16px; height:16px; }
+  .m-hbtn.white{ background:#fff; color:#3A1C8C; }
+  .m-hbtn.glass{ background:rgba(255,255,255,.18); color:#fff; backdrop-filter:blur(6px); }
+
+  /* ---- quick 2x2 grid ---- */
+  .m-quick{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:26px; }
+  .m-qtile{ display:flex; align-items:center; gap:10px; background:var(--surface-3); border-radius:12px; overflow:hidden; cursor:pointer; }
+  .m-qtile .cv{ width:48px; height:48px; flex:none; }
+  .m-qtile .cv > div{ width:100%; height:100%; display:grid; place-items:center; }
+  .m-qname{ font-size:13px; font-weight:700; color:var(--text); padding-right:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* ---- horizontal section rows ---- */
+  .m-sec{ margin-bottom:24px; }
+  .m-sec-t{ font-size:20px; font-weight:700; letter-spacing:-.02em; color:var(--text); margin-bottom:14px; }
+  .m-hs{ display:flex; gap:14px; overflow-x:auto; margin:0 -20px; padding:0 20px; }
+  .m-card{ width:130px; flex:none; cursor:pointer; }
+  .m-card .cv{ width:130px; height:130px; border-radius:14px; }
+  .m-card.round .cv{ border-radius:65px; }
+  .m-card .ct{ font-size:14px; font-weight:600; color:var(--text); margin-top:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .m-card .cs{ font-size:12.5px; color:var(--text-3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .m-card.round .ct, .m-card.round .cs{ text-align:center; }
+
+  /* ---- search box + genres ---- */
+  .m-searchbox{ display:flex; align-items:center; gap:10px; background:var(--surface-3); border-radius:14px; padding:13px 16px; margin-bottom:20px; }
+  .m-searchbox .ic{ width:21px; height:21px; color:var(--text-3); }
+  .m-searchbox input{ flex:1; background:none; border:none; outline:none; color:var(--text); font-size:15.5px; font-family:inherit; }
+  .m-searchbox input::placeholder{ color:var(--text-3); }
+  .m-genres{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .m-genre{ position:relative; height:92px; border-radius:14px; overflow:hidden; padding:14px; cursor:pointer; }
+  .m-genre h3{ color:#fff; font-size:16px; font-weight:700; position:relative; z-index:1; }
+  .m-genre .deco{ position:absolute; right:-10px; bottom:-10px; width:64px; height:64px; background:rgba(255,255,255,.18); border-radius:10px; transform:rotate(25deg); }
+
+  /* ---- library tabs + list rows ---- */
+  .m-ltabs{ display:flex; gap:8px; overflow-x:auto; margin:0 -20px 18px; padding:0 20px; }
+  .m-ltab{ flex:none; padding:8px 16px; border-radius:999px; font-size:13.5px; font-weight:600; font-family:inherit; border:none; cursor:pointer;
+    background:var(--surface-3); color:var(--text-2); }
+  .m-ltab.on{ background:var(--text); color:var(--bg); }
+  .m-lrow{ display:flex; align-items:center; gap:14px; padding:10px 4px; cursor:pointer; }
+  .m-lrow .cv{ width:56px; height:56px; border-radius:12px; flex:none; }
+  .m-lrow .cv > div{ width:100%; height:100%; display:grid; place-items:center; }
+  .m-lrow .lt{ font-size:16px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .m-lrow .ls{ font-size:13px; color:var(--text-3); margin-top:2px; }
+  .m-lrow .ic{ width:20px; height:20px; color:var(--text-3); }
+
+  /* ---- track rows (playlist / liked) ---- */
+  .m-trow{ display:flex; align-items:center; gap:12px; padding:9px 4px; border-radius:12px; cursor:pointer; }
+  .m-trow.cur{ background:var(--hover); }
+  .m-trow .cv{ width:46px; height:46px; border-radius:9px; flex:none; }
+  .m-trow .tw{ flex:1; min-width:0; }
+  .m-trow .tt{ font-size:15px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .m-trow.cur .tt{ color:var(--accent-2); }
+  .m-trow .ta{ font-size:13px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .m-trow .lk{ padding:4px; flex:none; color:var(--text-3); cursor:pointer; }
+  .m-trow .lk.on{ color:var(--accent); }
+  .m-trow .lk .ic{ width:19px; height:19px; }
+  .m-trow .mmore{ padding:4px; flex:none; color:var(--text-3); background:none; border:none; cursor:pointer; }
+  .m-trow .dur{ font-size:13px; color:var(--text-3); min-width:34px; text-align:right; flex:none; }
+
+  /* track action menu → bottom sheet */
+  .ctx-menu{
+    position:fixed !important; left:10px !important; right:10px !important;
+    top:auto !important; bottom:calc(env(safe-area-inset-bottom, 0px) + 14px) !important;
+    min-width:0; width:auto; max-height:64vh; border-radius:20px; padding:8px;
+  }
+  .ctx-menu button{ padding:13px 14px; font-size:15px; }
+  .ctx-menu button svg{ width:20px; height:20px; }
+  .ctx-label{ padding:10px 14px 5px; }
+
+  /* ---- playlist detail ---- */
+  .m-pl-back{ margin-bottom:4px; }
+  .m-pl-hero{ display:flex; flex-direction:column; align-items:center; text-align:center; }
+  .m-pl-cover{ width:188px; height:188px; border-radius:18px; box-shadow:0 24px 50px -16px rgba(20,8,50,.5); display:grid; place-items:center; }
+  .m-pl-kind{ font-size:11px; font-weight:700; letter-spacing:.1em; color:var(--text-3); margin-top:18px; text-transform:uppercase; }
+  .m-pl-title{ font-size:28px; font-weight:800; letter-spacing:-.03em; color:var(--text); margin-top:6px; }
+  .m-pl-desc{ font-size:13.5px; color:var(--text-2); margin-top:8px; line-height:1.45; }
+  .m-pl-stats{ font-size:13px; color:var(--text-3); margin-top:10px; }
+  .m-pl-actions{ display:flex; align-items:center; gap:24px; margin-top:20px; }
+  .m-pl-actions .sm{ padding:4px; color:var(--text-2); cursor:pointer; }
+  .m-pl-actions .sm.on{ color:var(--accent-2); }
+  .m-pl-actions .sm .ic{ width:22px; height:22px; }
+  .m-pl-play{ border:none; width:58px; height:58px; border-radius:50%; background:linear-gradient(135deg,#7C4DE8,var(--accent)); display:grid; place-items:center;
+    box-shadow:0 12px 26px -8px rgba(108,60,224,.6); cursor:pointer; }
+  .m-pl-play .ic{ width:26px; height:26px; color:#fff; }
+  .m-pl-list{ padding-top:24px; }
+
+  /* ---- profile ---- */
+  .m-prof-top{ display:flex; flex-direction:column; align-items:center; padding-top:8px; }
+  .m-prof-av{ width:96px; height:96px; border-radius:50%; background:var(--accent-grad); display:grid; place-items:center; color:#fff; font-size:38px; font-weight:800; }
+  .m-prof-name{ font-size:26px; font-weight:800; letter-spacing:-.02em; color:var(--text); margin-top:14px; }
+  .m-prof-sub{ font-size:13.5px; color:var(--text-2); margin-top:6px; }
+  .m-prof-sub b{ color:var(--text); }
+  .m-seclbl{ font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); font-weight:700; margin:26px 4px 12px; }
+  .m-card-row{ display:flex; align-items:center; gap:12px; padding:14px; background:var(--surface-3); border-radius:14px; margin-bottom:10px; cursor:pointer; }
+  .m-card-row .ico{ width:42px; height:42px; border-radius:11px; background:var(--accent-soft); display:grid; place-items:center; color:var(--accent-2); flex:none; }
+  .m-card-row .ico .ic{ width:20px; height:20px; }
+  .m-card-row .tw{ flex:1; min-width:0; }
+  .m-card-row .a{ font-size:15px; font-weight:600; color:var(--text); overflow-wrap:anywhere; line-height:1.25; }
+  .m-card-row .b{ font-size:12.5px; color:var(--text-3); margin-top:2px; overflow-wrap:anywhere; }
+  .m-badge-go{ border:none; font-family:inherit; font-size:13px; font-weight:600; color:#fff; padding:8px 15px; border-radius:999px; background:var(--accent); cursor:pointer; flex:none; }
+  .m-seg{ display:flex; background:var(--bg); border-radius:999px; padding:3px; gap:2px; flex:none; }
+  .m-seg button{ border:none; font-family:inherit; padding:7px 12px; border-radius:999px; font-size:12.5px; font-weight:600; background:transparent; color:var(--text-3); cursor:pointer; white-space:nowrap; }
+  .m-seg button.on{ background:var(--accent); color:#fff; }
+  .m-switch{ width:46px; height:27px; border-radius:999px; background:var(--line); position:relative; transition:.2s var(--ease); flex:none; }
+  .m-switch.on{ background:var(--accent); }
+  .m-switch::after{ content:''; position:absolute; top:3px; left:3px; width:21px; height:21px; border-radius:50%; background:#fff; transition:.2s var(--ease); box-shadow:0 2px 5px rgba(0,0,0,.25); }
+  .m-switch.on::after{ left:22px; }
+
+  .m-empty{ text-align:center; color:var(--text-3); padding:40px 10px; font-size:14px; }
+
+  /* ============================================================
+     mini-player (floats above tab bar) + bottom tabs + fs player
+     ============================================================ */
+  .player{
+    position:fixed; left:10px; right:10px; bottom:64px; z-index:60; overflow:hidden;
+    display:flex; align-items:center; gap:11px; padding:10px 14px;
+    grid-template-columns:none; border-radius:16px;
+    background:var(--player-bg); backdrop-filter:blur(24px) saturate(160%);
+  }
+  .np-left{ flex:1; gap:12px; min-width:0; }
+  .np-left .npc{ width:44px; height:44px; border-radius:10px; }
+  .np-left .npmeta{ min-width:0; }
+  .np-like{ flex:none; }
+  .np-right{ display:none; }
+  .np-center{ flex:none; width:auto; max-width:none; flex-direction:row; gap:0; }
+  .np-controls{ gap:0; }
+  .np-controls .sm{ display:none; }
+  .np-play{ width:42px; height:42px; }
+  /* progress = thin accent fill clipped to the rounded card top; no idle track line */
+  .np-progress{ position:absolute; left:0; right:0; top:0; width:auto; padding:0; gap:0; }
+  .np-progress .tm{ display:none; }
+  .np-progress .bar{ height:3px; border-radius:0; background:transparent; cursor:default; }
+  .np-progress .bar .fill{ border-radius:0; }
+  .np-progress .bar .knob{ display:none; }
+
+  .mtabs{
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:65; height:62px;
+    background:var(--player-bg); backdrop-filter:blur(24px) saturate(160%);
+    border-top:1px solid var(--line);
+  }
+  .mtab{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+    color:var(--text-3); font-size:11px; font-weight:600; background:none; border:none; cursor:pointer; transition:color .15s var(--ease); }
+  .mtab svg{ width:23px; height:23px; }
+  .mtab.active{ color:var(--accent-2); }
+
+  /* full-screen player → single column sheet */
+  .fsplayer{ grid-template-columns:1fr; }
+  .fs-right{ display:none; }
+  .fs-left{ justify-content:center; align-items:center; padding:64px 24px 40px; gap:0; }
+  .fs-cover{ width:min(58vw,280px); }
+  .fs-trackinfo{ width:min(80vw,330px); margin-top:26px; text-align:center; }
+  .fs-trackinfo .tt{ font-size:23px; }
+  .fs-trackinfo .ta{ font-size:15px; }
+  .fs-progress{ width:min(80vw,330px); margin-top:22px; }
+  .fs-controls{ margin-top:24px; gap:22px; }
+  .fs-controls .fs-play{ width:62px; height:62px; }
+  .fs-controls .fs-play svg{ width:26px; height:26px; }
+  .fs-controls button svg{ width:23px; height:23px; }
+  .fs-close{ top:16px; right:16px; }
+
+  /* notifications panel as centered top sheet */
+  .notif-panel{ position:fixed; top:14px; left:12px; right:12px; width:auto; max-height:70vh; z-index:300; }
+
+  /* ============================================================
+     YouTube engine on mobile — must stay visible to actually play.
+     Base: rendered but invisible (so playback can start on tap).
+     When a YT track is open fullscreen, it becomes the cover.
+     ============================================================ */
+  /* The YouTube engine stays off-screen — the player always shows the track
+     artwork, never the video. */
+  #ytplayer-wrap{
+    position:fixed; left:-9999px; top:0;
+    width:200px; height:120px; opacity:0; pointer-events:none; overflow:hidden;
+  }
+  #ytplayer-wrap iframe, #ytplayer{ width:100% !important; height:100% !important; border:0; display:block; }
+}

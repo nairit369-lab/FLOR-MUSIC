@@ -1,0 +1,16 @@
+{
+  "name": "FLOR MUSIC",
+  "short_name": "FLOR",
+  "description": "Поиск и прослушивание музыки — бесплатно",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0C0814",
+  "theme_color": "#0C0814",
+  "icons": [
+    { "src": "assets/flor-logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/flor-logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/flor-logo.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
