@@ -13,13 +13,21 @@
   }
   .app{ display:block; height:100dvh; padding:0; gap:0; }
   .sidebar, .topbar{ display:none !important; }
-  .main{ height:100dvh; border:none; border-radius:0; display:flex; flex-direction:column; min-height:0; }
+  .main{ height:100dvh; border:none; border-radius:0; display:flex; flex-direction:column; min-height:0; padding-top: env(safe-area-inset-top, 0px); }
   .content{ flex:1; min-height:0; overflow-y:auto; padding:0; border-radius:0; }
-  .content-inner{ padding-bottom:176px; }
+  .content-inner{ padding-bottom: calc(176px + env(safe-area-inset-bottom, 0px)); }
 
   /* desktop screen renderers are replaced by .mscreen on mobile */
   .screen > :not(.mscreen){ }
-  .mscreen{ display:block; padding:16px 20px 0; }
+  .mscreen{ display:block; padding: calc(12px + env(safe-area-inset-top, 0px)) 20px 0; }
+
+  /* sticky header so greeting / nav stays visible while scrolling */
+  .m-top{
+    position: sticky; top: 0; z-index: 30;
+    margin: calc(-1 * env(safe-area-inset-top, 0px)) -20px 18px;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 20px 10px;
+    background: linear-gradient(180deg, var(--bg) 70%, transparent);
+  }
 
   .mscroll{ scrollbar-width:none; -ms-overflow-style:none; }
   .mscroll::-webkit-scrollbar{ width:0; height:0; display:none; }
@@ -110,7 +118,9 @@
   .m-trow .lk{ padding:4px; flex:none; color:var(--text-3); cursor:pointer; }
   .m-trow .lk.on{ color:var(--accent); }
   .m-trow .lk .ic{ width:19px; height:19px; }
-  .m-trow .mmore{ padding:4px; flex:none; color:var(--text-3); background:none; border:none; cursor:pointer; }
+  .m-trow .maddpl{ width:34px; height:34px; border-radius:50%; border:none; background:var(--accent-soft); color:var(--accent-2); display:grid; place-items:center; flex:none; cursor:pointer; }
+  .m-trow .maddpl .ic{ width:18px; height:18px; }
+  .m-trow .mmore{ width:34px; height:34px; border-radius:50%; border:none; background:transparent; color:var(--text-3); display:grid; place-items:center; flex:none; cursor:pointer; }
   .m-trow .dur{ font-size:13px; color:var(--text-3); min-width:34px; text-align:right; flex:none; }
 
   /* track action menu → bottom sheet */
@@ -141,8 +151,11 @@
   .m-pl-list{ padding-top:24px; }
 
   /* ---- profile ---- */
-  .m-prof-top{ display:flex; flex-direction:column; align-items:center; padding-top:8px; }
-  .m-prof-av{ width:96px; height:96px; border-radius:50%; background:var(--accent-grad); display:grid; place-items:center; color:#fff; font-size:38px; font-weight:800; }
+  .m-prof-top{ display:flex; flex-direction:column; align-items:center; text-align:center; padding:8px 0 20px; }
+  .m-prof-av-wrap{ position:relative; display:inline-block; margin-bottom:10px; }
+  .m-prof-av{ width:96px; height:96px; border-radius:50%; background:var(--accent-grad); display:grid; place-items:center; color:#fff; font-size:38px; font-weight:800; cursor:pointer; overflow:hidden; }
+  .m-av-badge{ position:absolute; right:-2px; bottom:-2px; width:32px; height:32px; border-radius:50%; background:var(--accent); display:grid; place-items:center; border:3px solid var(--bg); box-shadow:0 4px 12px rgba(108,60,224,.4); cursor:pointer; }
+  .m-avatar-btn{ margin-top:14px; display:inline-flex; align-items:center; gap:8px; padding:10px 20px; border-radius:999px; background:var(--accent-soft); color:var(--accent-2); font-weight:700; font-size:14px; border:none; cursor:pointer; font-family:inherit; }
   .m-prof-name{ font-size:26px; font-weight:800; letter-spacing:-.02em; color:var(--text); margin-top:14px; }
   .m-prof-sub{ font-size:13.5px; color:var(--text-2); margin-top:6px; }
   .m-prof-sub b{ color:var(--text); }
@@ -168,7 +181,7 @@
      mini-player (floats above tab bar) + bottom tabs + fs player
      ============================================================ */
   .player{
-    position:fixed; left:10px; right:10px; bottom:64px; z-index:60; overflow:hidden;
+    position:fixed; left:10px; right:10px; bottom:calc(64px + env(safe-area-inset-bottom, 0px)); z-index:60; overflow:hidden;
     display:flex; align-items:center; gap:11px; padding:10px 14px;
     grid-template-columns:none; border-radius:16px;
     background:var(--player-bg); backdrop-filter:blur(24px) saturate(160%);
@@ -190,7 +203,9 @@
   .np-progress .bar .knob{ display:none; }
 
   .mtabs{
-    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:65; height:62px;
+    display:flex; position:fixed; left:0; right:0; bottom:0; z-index:65;
+    height: calc(62px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     background:var(--player-bg); backdrop-filter:blur(24px) saturate(160%);
     border-top:1px solid var(--line);
   }
@@ -215,7 +230,7 @@
   .fs-close{ top:16px; right:16px; }
 
   /* notifications panel as centered top sheet */
-  .notif-panel{ position:fixed; top:14px; left:12px; right:12px; width:auto; max-height:70vh; z-index:300; }
+  .notif-panel{ position:fixed; top: calc(14px + env(safe-area-inset-top, 0px)); left:12px; right:12px; width:auto; max-height:70vh; z-index:300; }
 
   /* ============================================================
      YouTube engine on mobile — must stay visible to actually play.

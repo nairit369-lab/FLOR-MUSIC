@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=13';
-import { player } from './player.js?v=13';
+import { I } from './icons.js?v=14';
+import { player } from './player.js?v=14';
 import {
   SOURCES, search as apiSearch, primeAudius, loadProxyConfig, homeWaveTracks,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=13';
+} from './api.js?v=14';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -16,8 +16,12 @@ const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls)
 const LIKED_KEY = 'flor-liked-v1';
 const RECENT_KEY = 'flor-recent-v1';
 const PLAYLISTS_KEY = 'flor-playlists-v1';
+const WAVE_KEY = 'flor-wave-v1';
+const LIB_UPDATED_KEY = 'flor-lib-updated';
 const USER_KEY = 'flor-user';
 const NOTIF_READ_KEY = 'flor-notif-read';
+
+function libKey(base){ return user?.email ? `${base}:${user.email}` : base; }
 
 const liked  = new Map(loadJSON(LIKED_KEY, []).map(t => [t.id, t]));
 let   recent = loadJSON(RECENT_KEY, []);
@@ -27,6 +31,98 @@ let   notifRead = new Set(loadJSON(NOTIF_READ_KEY, []));
 
 function loadJSON(k, def){ try { const v = JSON.parse(localStorage.getItem(k)); return v ?? def; } catch { return def; } }
 function saveJSON(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+
+function reloadLocalLibrary(){
+  if (!user?.email) return;
+  const pl = loadJSON(libKey(PLAYLISTS_KEY), null);
+  if (pl) playlists = pl;
+  const lk = loadJSON(libKey(LIKED_KEY), null);
+  if (lk){ liked.clear(); lk.forEach(t => liked.set(t.id, t)); }
+}
+
+let _syncTimer = null;
+function syncLibraryToServer(){
+  if (!user?.email) return;
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(async () => {
+    const updatedAt = Date.now();
+    try {
+      const r = await fetch('/api/auth/library', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: user.email,
+          playlists,
+          liked: [...liked.values()],
+          wave: loadJSON(WAVE_KEY, []),
+          updatedAt,
+        }),
+      });
+      const j = await r.json();
+      if (r.ok) saveJSON(LIB_UPDATED_KEY, j.library?.updatedAt || updatedAt);
+    } catch {}
+  }, 700);
+}
+
+function applyLibrary(lib){
+  if (!lib) return;
+  const localAt = loadJSON(LIB_UPDATED_KEY, 0);
+  const serverAt = lib.updatedAt || 0;
+  const serverHasData = !!(lib.playlists?.length || lib.liked?.length || lib.wave?.length);
+  const localHasData = !!(playlists.length || liked.size || loadJSON(WAVE_KEY, [])?.length);
+  if (!serverHasData && localHasData){ syncLibraryToServer(); return; }
+  if (serverAt < localAt && localHasData) return;
+  if (Array.isArray(lib.playlists)){
+    playlists = lib.playlists;
+    saveJSON(PLAYLISTS_KEY, playlists);
+    if (user?.email) saveJSON(libKey(PLAYLISTS_KEY), playlists);
+  }
+  if (Array.isArray(lib.liked)){
+    liked.clear();
+    lib.liked.forEach(t => liked.set(t.id, t));
+    saveJSON(LIKED_KEY, lib.liked);
+    if (user?.email) saveJSON(libKey(LIKED_KEY), lib.liked);
+  }
+  if (Array.isArray(lib.wave) && lib.wave.length) saveJSON(WAVE_KEY, lib.wave);
+  saveJSON(LIB_UPDATED_KEY, serverAt);
+  renderSidePlaylists();
+}
+
+async function loadLibraryFromServer(email){
+  if (!email) return;
+  try {
+    const r = await fetch('/api/auth/library', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const j = await r.json();
+    if (r.ok && j.library) applyLibrary(j.library);
+  } catch {}
+}
+
+function getWaveTracks(){
+  const saved = loadJSON(WAVE_KEY, null);
+  if (saved?.length) return saved;
+  return state.home?.trending || [];
+}
+
+function persistWave(tracks){
+  if (!tracks?.length) return;
+  saveJSON(WAVE_KEY, tracks.map(stripTrack));
+  syncLibraryToServer();
+}
+
+function playMyWave(){
+  let list = getWaveTracks();
+  if (!list.length && state.home?.trending?.length){
+    list = state.home.trending;
+    persistWave(list);
+  }
+  if (!list.length){ toast('Загружаем волну…'); ensureHomeData(); return; }
+  player.playQueue(list, 0);
+  if (isMobile()) openFS();
+}
 
 /* ---------- in-memory state ---------- */
 const state = {
@@ -130,12 +226,15 @@ function trackRow(track, idx, list, compact, ctx){
     <div class="tdur">${durText}</div>
     ${compact ? '' : `<div class="tact">
       <button class="like ${isLiked ? 'on' : ''}" title="Нравится">${isLiked ? I.heartFill : I.heart}</button>
+      <button class="addpl" title="В плейлист">${I.plus}</button>
       <button class="more" title="Ещё">${I.more}</button>
     </div>`}`;
   r._trackId = track.id;
   r.addEventListener('click', () => player.playQueue(list, idx));
   const lk = r.querySelector('.like');
   if (lk) lk.addEventListener('click', e => { e.stopPropagation(); toggleLike(track); });
+  const ap = r.querySelector('.addpl');
+  if (ap) ap.addEventListener('click', e => { e.stopPropagation(); quickAddToPlaylist(track, ap); });
   const mr = r.querySelector('.more');
   if (mr) mr.addEventListener('click', e => { e.stopPropagation(); openTrackMenu(track, mr, ctx); });
   return r;
@@ -184,11 +283,7 @@ function renderHome(){
       <button class="btn-glass solid">${I.play} Слушать</button>
       <button class="btn-glass" id="heroSearch">${I.search} Найти музыку</button>
     </div>`;
-  hero.querySelector('.btn-glass.solid').addEventListener('click', () => {
-    const list = state.home?.trending;
-    if (list?.length) player.playQueue(list, 0);
-    else toast('Загружаем волну…');
-  });
+  hero.querySelector('.btn-glass.solid').addEventListener('click', () => playMyWave());
   hero.querySelector('#heroSearch').addEventListener('click', () => go('search'));
   const heroSec = el('div', 'section'); heroSec.appendChild(hero); wrap.appendChild(heroSec);
 
@@ -494,6 +589,7 @@ async function renderPlaylist(ctx){
   actions.innerHTML = `
     <button class="btn-play-lg">${I.play}</button>
     <button class="btn-ghost" title="Перемешать">${I.shuffle}</button>
+    ${isUser ? `<button class="btn-ghost" id="plRename" title="Переименовать">${I.edit}</button>` : ''}
     ${isUser ? `<button class="btn-ghost danger" id="plDelete" title="Удалить плейлист">${I.trash}</button>` : ''}`;
   wrap.appendChild(actions);
 
@@ -513,7 +609,7 @@ async function renderPlaylist(ctx){
   const countEl = wrap.querySelector('#plCount');
   if (countEl) countEl.textContent = `${tracks.length} треков`;
   if (!tracks.length){
-    body.appendChild(centerState({ title: 'Здесь пока пусто', sub: isUser ? 'Добавьте треки через «⋯» рядом с любым треком.' : (isLiked ? 'Добавьте любимые треки.' : 'Не удалось получить треки.') }));
+    body.appendChild(centerState({ title: 'Здесь пока пусто', sub: isUser ? 'Добавьте треки кнопкой «+» рядом с любым треком.' : (isLiked ? 'Добавьте любимые треки.' : 'Не удалось получить треки.') }));
   } else {
     const th = el('div', 'track-head');
     th.innerHTML = `<div>#</div><div></div><div>Название</div><div>Альбом</div><div class="r">${I.clock}</div><div></div>`;
@@ -530,6 +626,8 @@ async function renderPlaylist(ctx){
   if (del) del.addEventListener('click', () => {
     if (confirm('Удалить этот плейлист?')){ deletePlaylist(ctx.id); toast('Плейлист удалён'); go('library'); }
   });
+  const ren = wrap.querySelector('#plRename');
+  if (ren) ren.addEventListener('click', () => openRenamePlaylistModal(ctx.id));
   return wrap;
 }
 
@@ -540,13 +638,19 @@ function renderProfile(){
   const wrap = el('div', 'settings');
   const top = el('div', 'profile-top');
   top.innerHTML = `
-    ${avatarHTML(104, 'pa', 'Нажмите, чтобы сменить аватар')}
+    <div class="avatar-wrap">
+      ${avatarHTML(104, 'pa', 'Сменить фото')}
+      <div class="av-badge" title="Сменить фото">${I.camera}</div>
+    </div>
     <div>
       <div class="kind" style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text-3)">Профиль</div>
       <h1>${esc(user?.name || 'Гость')}</h1>
       <div class="ps">${user ? `${esc(user.email)} · ` : ''}<b>${liked.size}</b> любимых · <b>${playlists.length}</b> плейлистов · <b>FLOR Free</b></div>
+      ${user ? `<button type="button" class="avatar-edit-btn" id="avChangeBtn">${I.camera} Сменить фото</button>` : ''}
     </div>`;
   top.querySelector('.pa').addEventListener('click', () => openAvatarModal());
+  top.querySelector('.av-badge')?.addEventListener('click', () => openAvatarModal());
+  top.querySelector('#avChangeBtn')?.addEventListener('click', () => openAvatarModal());
   wrap.appendChild(top);
 
   // Account
@@ -591,7 +695,9 @@ function renderProfile(){
   clearRow.addEventListener('click', () => {
     if (!confirm('Очистить любимое, плейлисты и историю?')) return;
     liked.clear(); recent = []; playlists = [];
-    saveJSON(LIKED_KEY, []); saveJSON(RECENT_KEY, []); saveJSON(PLAYLISTS_KEY, []);
+    saveJSON(LIKED_KEY, []); saveJSON(RECENT_KEY, []); saveJSON(PLAYLISTS_KEY, []); saveJSON(WAVE_KEY, []);
+    if (user?.email){ saveJSON(libKey(PLAYLISTS_KEY), []); saveJSON(libKey(LIKED_KEY), []); }
+    syncLibraryToServer();
     toast('Данные очищены'); render();
   });
   g3.appendChild(clearRow); wrap.appendChild(g3);
@@ -631,6 +737,7 @@ function ensureHomeData(){
       state.home = { trending, playlists: plists,
         genres: [{ label: 'Электроника в тренде', tracks: electronic }, { label: 'Hip-Hop в тренде', tracks: hiphop }],
         radio: [] };
+      if (trending?.length && !loadJSON(WAVE_KEY, null)?.length) persistWave(trending);
       buildNotifications();
     } catch (e){
       console.warn(e);
@@ -659,13 +766,16 @@ function mTrackRow(track, list, idx, ctx){
   r.innerHTML = `${mCover(track, 46, 9)}
     <div class="tw"><div class="tt">${esc(track.title)}</div><div class="ta">${esc(track.artist)}</div></div>
     <div class="lk ${isLiked ? 'on' : ''}">${mIc(isLiked ? 'heartFill' : 'heart', 19)}</div>
-    <button class="mmore" title="Добавить в плейлист">${mIc('more', 20)}</button>`;
+    <button class="maddpl" title="В плейлист">${mIc('plus', 20, 'var(--accent-2)')}</button>
+    <button class="mmore" title="Ещё">${mIc('more', 20)}</button>`;
   r.addEventListener('click', () => player.playQueue(list, idx));
   const lk = r.querySelector('.lk');
   lk.addEventListener('click', e => {
     e.stopPropagation(); toggleLike(track);
     const on = liked.has(track.id); lk.classList.toggle('on', on); lk.innerHTML = mIc(on ? 'heartFill' : 'heart', 19);
   });
+  const add = r.querySelector('.maddpl');
+  add.addEventListener('click', e => { e.stopPropagation(); quickAddToPlaylist(track, add); });
   const more = r.querySelector('.mmore');
   more.addEventListener('click', e => { e.stopPropagation(); openTrackMenu(track, more, ctx); });
   return r;
@@ -706,7 +816,7 @@ function renderMHome(){
       <button class="m-hbtn white" id="mPlayWave">${mIc('play', 16, '#3A1C8C')} Слушать</button>
       <button class="m-hbtn glass" id="mFindWave">${mIc('search', 16, '#fff')} Найти</button>
     </div>`;
-  hero.querySelector('#mPlayWave').addEventListener('click', () => { const l = state.home?.trending; if (l?.length){ player.playQueue(l, 0); openFS(); } else toast('Загружаем волну…'); });
+  hero.querySelector('#mPlayWave').addEventListener('click', () => playMyWave());
   hero.querySelector('#mFindWave').addEventListener('click', () => go('search'));
   w.appendChild(hero);
 
@@ -838,6 +948,7 @@ function renderMPlaylist(ctx){
     <div class="m-pl-actions">
       <div class="sm" id="mPlShuf">${mIc('shuffle', 22)}</div>
       <button class="m-pl-play" id="mPlPlay">${mIc('play', 26, '#fff')}</button>
+      ${isUser ? `<div class="sm" id="mPlRen">${mIc('edit', 22)}</div>` : ''}
       ${isUser ? `<div class="sm" id="mPlDel">${mIc('trash', 22)}</div>` : `<div class="sm" id="mPlDl">${mIc('download', 22)}</div>`}
     </div>`;
   w.appendChild(hero);
@@ -856,13 +967,14 @@ function renderMPlaylist(ctx){
     } catch (e){ console.warn(e); }
     const cnt = w.querySelector('#mPlCount'); if (cnt) cnt.textContent = `${esc(user?.name || 'FLOR')} · ${tracks.length} треков`;
     listHost.innerHTML = '';
-    if (!tracks.length){ const h = el('div', 'm-empty'); h.textContent = isUser ? 'Добавьте треки через «⋯» у любого трека.' : (isLiked ? 'Добавьте любимые треки ♥' : 'Не удалось получить треки.'); listHost.appendChild(h); }
+    if (!tracks.length){ const h = el('div', 'm-empty'); h.textContent = isUser ? 'Добавьте треки кнопкой «+» у любого трека.' : (isLiked ? 'Добавьте любимые треки ♥' : 'Не удалось получить треки.'); listHost.appendChild(h); }
     else tracks.forEach((t, i) => listHost.appendChild(mTrackRow(t, tracks, i, isUser ? { playlistId: ctx.id } : null)));
     const pp = w.querySelector('#mPlPlay'); if (pp) pp.addEventListener('click', () => { if (tracks.length){ player.playQueue(tracks, 0); openFS(); } });
     const sh = w.querySelector('#mPlShuf'); if (sh) sh.addEventListener('click', () => { if (tracks.length){ if (!player.shuffle) player.toggleShuffle(); player.playQueue(tracks, Math.floor(Math.random() * tracks.length)); } });
   })();
 
   const del = hero.querySelector('#mPlDel'); if (del) del.addEventListener('click', () => { if (confirm('Удалить этот плейлист?')){ deletePlaylist(ctx.id); toast('Плейлист удалён'); go('library'); } });
+  const ren = hero.querySelector('#mPlRen'); if (ren) ren.addEventListener('click', () => openRenamePlaylistModal(ctx.id));
   const dl = hero.querySelector('#mPlDl'); if (dl) dl.addEventListener('click', () => toast('Скачивание недоступно'));
   return w;
 }
@@ -870,10 +982,16 @@ function renderMPlaylist(ctx){
 function renderMProfile(){
   const w = el('div', 'mscreen');
   const top = el('div', 'm-prof-top');
-  top.innerHTML = `${avatarHTML(96, 'm-prof-av', 'Сменить аватар')}
+  top.innerHTML = `<div class="m-prof-av-wrap">
+      ${avatarHTML(96, 'm-prof-av', 'Сменить фото')}
+      <div class="m-av-badge">${mIc('camera', 16, '#fff')}</div>
+    </div>
     <div class="m-prof-name">${esc(user?.name || 'Гость')}</div>
-    <div class="m-prof-sub">${user ? esc(user.email) + ' · ' : ''}<b>${liked.size}</b> любимых · <b>${playlists.length}</b> плейлистов · <b>FLOR Free</b></div>`;
+    <div class="m-prof-sub">${user ? esc(user.email) + ' · ' : ''}<b>${liked.size}</b> любимых · <b>${playlists.length}</b> плейлистов · <b>FLOR Free</b></div>
+    ${user ? `<button type="button" class="m-avatar-btn" id="mAvChange">${mIc('camera', 16, 'var(--accent-2)')} Сменить фото</button>` : ''}`;
   top.querySelector('.m-prof-av').addEventListener('click', () => openAvatarModal());
+  top.querySelector('.m-av-badge')?.addEventListener('click', () => openAvatarModal());
+  top.querySelector('#mAvChange')?.addEventListener('click', () => openAvatarModal());
   w.appendChild(top);
 
   w.appendChild(mLabel('Аккаунт'));
@@ -903,7 +1021,7 @@ function renderMProfile(){
   w.appendChild(mLabel('Данные'));
   const clear = el('div', 'm-card-row');
   clear.innerHTML = `<div class="ico" style="background:var(--hover);color:var(--text-2)">${mIc('trash', 20)}</div><div class="tw"><div class="a">Очистить любимое, плейлисты и историю</div><div class="b">Удаляет данные из этого браузера</div></div>`;
-  clear.addEventListener('click', () => { if (!confirm('Очистить любимое, плейлисты и историю?')) return; liked.clear(); recent = []; playlists = []; saveJSON(LIKED_KEY, []); saveJSON(RECENT_KEY, []); saveJSON(PLAYLISTS_KEY, []); toast('Данные очищены'); render(); });
+  clear.addEventListener('click', () => { if (!confirm('Очистить любимое, плейлисты и историю?')) return; liked.clear(); recent = []; playlists = []; saveJSON(LIKED_KEY, []); saveJSON(RECENT_KEY, []); saveJSON(PLAYLISTS_KEY, []); saveJSON(WAVE_KEY, []); if (user?.email){ saveJSON(libKey(PLAYLISTS_KEY), []); saveJSON(libKey(LIKED_KEY), []); } syncLibraryToServer(); toast('Данные очищены'); render(); });
   w.appendChild(clear);
   return w;
 }
@@ -1009,6 +1127,8 @@ function toggleLike(track){
   if (liked.has(track.id)){ liked.delete(track.id); toast('Удалено из любимого'); }
   else { liked.set(track.id, stripTrack(track)); toast('Добавлено в любимое'); }
   saveJSON(LIKED_KEY, [...liked.values()]);
+  if (user?.email) saveJSON(libKey(LIKED_KEY), [...liked.values()]);
+  syncLibraryToServer();
   syncPlayerUI(); refreshCurrentScreenLists();
 }
 function pushRecent(track){
@@ -1030,10 +1150,25 @@ function refreshCurrentScreenLists(){
 /* ============================================================
    User playlists
    ============================================================ */
-function savePlaylists(){ saveJSON(PLAYLISTS_KEY, playlists); }
+function savePlaylists(){
+  saveJSON(PLAYLISTS_KEY, playlists);
+  if (user?.email) saveJSON(libKey(PLAYLISTS_KEY), playlists);
+  syncLibraryToServer();
+}
 function createPlaylist(name){
   const p = { id: 'user:' + Date.now().toString(36), name: name.trim() || 'Новый плейлист', tracks: [], createdAt: Date.now() };
   playlists.unshift(p); savePlaylists(); return p;
+}
+function renamePlaylist(plId, name){
+  const p = playlists.find(x => x.id === plId);
+  if (!p) return;
+  const n = name.trim();
+  if (!n || n === p.name) return;
+  p.name = n.slice(0, 60);
+  savePlaylists();
+  toast('Название изменено');
+  renderSidePlaylists();
+  if (state.screen === 'playlist' && state.playlistCtx?.id === plId) render();
 }
 function addToPlaylist(plId, track){
   const p = playlists.find(x => x.id === plId); if (!p) return;
@@ -1050,6 +1185,56 @@ function removeFromPlaylist(plId, trackId){
   if (state.screen === 'playlist') render();
 }
 function deletePlaylist(plId){ playlists = playlists.filter(p => p.id !== plId); savePlaylists(); renderSidePlaylists(); }
+
+function quickAddToPlaylist(track, anchor){
+  if (!playlists.length) return openCreatePlaylistModal(track);
+  if (playlists.length === 1) return addToPlaylist(playlists[0].id, track);
+  openPlaylistPicker(track, anchor);
+}
+
+function openPlaylistPicker(track, anchor){
+  const menu = $('#ctxMenu');
+  let html = `<div class="ctx-label">Добавить в плейлист</div>`;
+  playlists.forEach(p => { html += `<button data-pl="${esc(p.id)}">${I.music}<span>${esc(p.name)}</span></button>`; });
+  html += `<button data-act="newpl">${I.plus}<span>Новый плейлист…</span></button>`;
+  menu.innerHTML = html;
+  const rect = anchor.getBoundingClientRect();
+  menu.hidden = false;
+  const mw = menu.offsetWidth || 240, mh = menu.offsetHeight || 200;
+  let left = rect.right - mw; let top = rect.bottom + 6;
+  if (top + mh > window.innerHeight) top = rect.top - mh - 6;
+  if (left < 8) left = 8;
+  menu.style.left = left + 'px'; menu.style.top = Math.max(8, top) + 'px';
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const pl = b.dataset.pl;
+    if (pl) addToPlaylist(pl, track);
+    else if (b.dataset.act === 'newpl') openCreatePlaylistModal(track);
+    closeCtxMenu();
+  }));
+}
+
+function openRenamePlaylistModal(plId){
+  const p = playlists.find(x => x.id === plId);
+  if (!p) return;
+  const box = openModal(`
+    <button class="modal-close" id="mClose">${I.shrink}</button>
+    <h2>Переименовать плейлист</h2>
+    <p class="modal-sub">Введите новое название.</p>
+    <input class="modal-input" id="plRename" value="${esc(p.name)}" maxlength="60">
+    <div class="modal-actions">
+      <button class="btn-modal ghost" id="mCancel">Отмена</button>
+      <button class="btn-modal primary" id="mSave">Сохранить</button>
+    </div>`);
+  box.querySelector('#mClose').addEventListener('click', closeModal);
+  box.querySelector('#mCancel').addEventListener('click', closeModal);
+  box.querySelector('#mSave').addEventListener('click', () => {
+    renamePlaylist(plId, box.querySelector('#plRename').value);
+    closeModal();
+  });
+  const inp = box.querySelector('#plRename');
+  inp.focus(); inp.select();
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter'){ renamePlaylist(plId, inp.value); closeModal(); } });
+}
 
 /* ============================================================
    Context menu (track actions)
@@ -1133,7 +1318,16 @@ function openAuthModal(mode = 'login'){
       return { ok: false, j: { error: `Нет связи с сервером. ${hint}` } };
     }
   };
-  const finish = (j) => { user = { name: j.user.name, email: j.user.email, avatar: j.user.avatar || null }; saveJSON(USER_KEY, user); closeModal(); updateAvatar(); render(); toast(`Добро пожаловать, ${user.name}!`); };
+  const finish = async (j) => {
+    user = { name: j.user.name, email: j.user.email, avatar: j.user.avatar || null };
+    saveJSON(USER_KEY, user);
+    reloadLocalLibrary();
+    await loadLibraryFromServer(user.email);
+    closeModal();
+    updateAvatar();
+    render();
+    toast(`Добро пожаловать, ${user.name}!`);
+  };
 
   const head = (sub) => `
     <button class="modal-close" id="mClose">${I.shrink}</button>
@@ -1622,7 +1816,7 @@ function lockAppGestures(){
   document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
 }
 
-function init(){
+async function init(){
   lockAppGestures();
   let t = 'dark'; try { t = localStorage.getItem('flor-theme') || 'dark'; } catch {}
   document.documentElement.dataset.theme = t;
@@ -1718,7 +1912,7 @@ function init(){
     if (type === 'progress'){ updateProgressUI(); return; }
     if (type === 'change' || type === 'queue') pushRecent(player.current);
     if (type === 'mediaerror') toast('Источник недоступен, пропускаем');
-    if (type === 'error') toast('Не удалось воспроизвести');
+    if (type === 'error' && player.queue.length <= 1) toast('Не удалось воспроизвести');
     updateYtMode();
     syncPlayerUI();
   });
@@ -1728,6 +1922,9 @@ function init(){
   const q = params.get('q'); const src = params.get('src');
   if (src && SOURCES.some(s => s.id === src)) state.source = src;
   if (q){ state.screen = 'search'; state.query = q; }
+
+  reloadLocalLibrary();
+  if (user?.email) await loadLibraryFromServer(user.email);
 
   render();
   syncPlayerUI();

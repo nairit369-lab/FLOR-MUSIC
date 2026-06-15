@@ -446,7 +446,13 @@ input{ font-family: inherit; }
 .seg button.on{ background: var(--accent); color:#fff; }
 
 .profile-top{ display:flex; align-items:center; gap:24px; padding: 16px 0 8px; }
-.profile-top .pa{ width:104px; height:104px; border-radius:50%; background: var(--accent-grad); display:grid; place-items:center; color:#fff; font-size:40px; font-weight:800; flex:none; cursor:pointer; overflow:hidden; }
+.profile-top .avatar-wrap{ position:relative; flex:none; }
+.profile-top .pa{ width:104px; height:104px; border-radius:50%; background: var(--accent-grad); display:grid; place-items:center; color:#fff; font-size:40px; font-weight:800; cursor:pointer; overflow:hidden; }
+.profile-top .av-badge{ position:absolute; right:2px; bottom:2px; width:34px; height:34px; border-radius:50%; background:var(--accent); color:#fff; display:grid; place-items:center; border:3px solid var(--bg); cursor:pointer; box-shadow:0 4px 14px rgba(108,60,224,.45); }
+.profile-top .av-badge svg{ width:17px; height:17px; }
+.avatar-edit-btn{ margin-top:12px; display:inline-flex; align-items:center; gap:8px; padding:10px 18px; border-radius:999px; background:var(--accent-soft); color:var(--accent-2); font-weight:700; font-size:13px; border:none; cursor:pointer; font-family:inherit; }
+.avatar-edit-btn svg{ width:16px; height:16px; }
+.avatar-edit-btn:hover{ background:var(--accent); color:#fff; }
 .profile-top h1{ font-size:38px; font-weight:800; letter-spacing:-0.03em; }
 .profile-top .ps{ color: var(--text-2); margin-top:6px; font-size:15px; }
 .profile-top .ps b{ color: var(--text); }
@@ -669,6 +675,9 @@ input{ font-family: inherit; }
 .app.on-search .topbar .searchbar{ display:none; }
 
 /* "more" (⋯) button on track rows */
+.track .tact .addpl{ width:30px; height:30px; border-radius:50%; display:grid; place-items:center; color:var(--accent-2); background:var(--accent-soft); }
+.track .tact .addpl:hover{ color:#fff; background:var(--accent); }
+.track .tact .addpl svg{ width:17px; height:17px; }
 .track .tact .more{ width:30px; height:30px; border-radius:50%; display:grid; place-items:center; color:var(--text-3); }
 .track .tact .more:hover{ color:var(--text); background:var(--hover); }
 .track .tact .more svg{ width:17px; height:17px; }

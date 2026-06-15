@@ -3,7 +3,7 @@
    - HTML5 <audio> for Audius / iTunes / Radio
    - Official YouTube IFrame Player for YouTube (full songs, no key)
    ============================================================ */
-import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=13';
+import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=14';
 
 class Player {
   constructor(){
@@ -200,7 +200,23 @@ class Player {
       this._updateMediaSession(track);
       if (autoplay){ try { await this.audio.play(); } catch {} }
     } catch (e){
-      if (token === this._loadToken){ this.loading = false; this._emit('error', e); }
+      if (token !== this._loadToken) return;
+      this.loading = false;
+      const t = this.current;
+      if (t && t.source === 'audius' && !t._streamRetry){
+        t._streamRetry = true;
+        t.streamUrl = null;
+        this._load(true);
+        return;
+      }
+      if (t && t.source === 'soundcloud' && !t._streamRetry){
+        t._streamRetry = true;
+        t.streamUrl = null;
+        this._load(true);
+        return;
+      }
+      this._emit('mediaerror');
+      if (this.queue.length > 1) setTimeout(() => this.next(true), 400);
     }
   }
 
@@ -208,6 +224,18 @@ class Player {
   async _onError(){
     this.loading = false;
     const t = this.current;
+    if (t && t.source === 'audius' && !t._streamRetry){
+      t._streamRetry = true;
+      t.streamUrl = null;
+      const fresh = await audiusStreamUrl(t.rawId);
+      if (fresh){ t.streamUrl = fresh; this._load(true); return; }
+    }
+    if (t && t.source === 'soundcloud' && !t._streamRetry){
+      t._streamRetry = true;
+      t.streamUrl = null;
+      const fresh = await soundcloudStreamUrl(t.rawId);
+      if (fresh){ t.streamUrl = fresh; this._load(true); return; }
+    }
     // YouTube IFrame failed (blocked on some ISPs) — try Piped from the browser,
     // then the server proxy as a last resort.
     if (t && t.source === 'youtube' && this.mode === 'yt' && !t._proxyTried){
@@ -218,7 +246,7 @@ class Player {
       return;
     }
     this._emit('mediaerror');
-    if (this.queue.length > 1) setTimeout(() => this.next(true), 600);
+    if (this.queue.length > 1) setTimeout(() => this.next(true), 400);
   }
 
   /* ---------- internals: YouTube ---------- */

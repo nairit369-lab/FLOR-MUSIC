@@ -348,6 +348,23 @@ const server = http.createServer(async (req, res) => {
       return json(200, { ok: true, user: userOut(u, email) });
     }
 
+    // 7) Sync library (playlists, liked, wave) across devices.
+    if (urlPath === '/api/auth/library'){
+      const u = users[email];
+      if (!u) return json(404, { error: 'Аккаунт не найден' });
+      const hasData = b.playlists || b.liked || b.wave;
+      if (hasData){
+        u.library = u.library || {};
+        if (Array.isArray(b.playlists)) u.library.playlists = b.playlists.slice(0, 50);
+        if (Array.isArray(b.liked)) u.library.liked = b.liked.slice(0, 500);
+        if (Array.isArray(b.wave)) u.library.wave = b.wave.slice(0, 80);
+        u.library.updatedAt = Number(b.updatedAt) || Date.now();
+        await saveUsers();
+      }
+      const lib = u.library || { playlists: [], liked: [], wave: [], updatedAt: 0 };
+      return json(200, { ok: true, library: lib });
+    }
+
     return json(404, { error: 'Неизвестный метод' });
   }
 
