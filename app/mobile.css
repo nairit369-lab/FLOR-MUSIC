@@ -7,6 +7,10 @@
 
 @media (max-width: 760px){
   /* ---- shell: hide desktop chrome, single column ---- */
+  html, body, .app, .main, .content{
+    touch-action: manipulation;
+    overscroll-behavior: none;
+  }
   .app{ display:block; height:100dvh; padding:0; gap:0; }
   .sidebar, .topbar{ display:none !important; }
   .main{ height:100dvh; border:none; border-radius:0; display:flex; flex-direction:column; min-height:0; }

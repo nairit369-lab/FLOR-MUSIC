@@ -28,12 +28,21 @@ async function audiusHost(){
   if (_audiusHostPromise) return _audiusHostPromise;
   _audiusHostPromise = (async () => {
     try {
-      const r = await fetch('https://api.audius.co');
-      const j = await r.json();
-      const hosts = (j.data || []).filter(Boolean);
-      _audiusHost = hosts[Math.floor(Math.random() * Math.min(hosts.length, 3))] || hosts[0] || 'https://discoveryprovider.audius.co';
-    } catch {
-      _audiusHost = 'https://discoveryprovider.audius.co';
+      const r = await fetch('/api/audius/host');
+      if (r.ok){
+        const j = await r.json();
+        _audiusHost = j.host || null;
+      }
+    } catch {}
+    if (!_audiusHost){
+      try {
+        const r = await fetch('https://api.audius.co');
+        const j = await r.json();
+        const hosts = (j.data || []).filter(Boolean);
+        _audiusHost = hosts[Math.floor(Math.random() * Math.min(hosts.length, 3))] || hosts[0] || 'https://discoveryprovider.audius.co';
+      } catch {
+        _audiusHost = 'https://discoveryprovider.audius.co';
+      }
     }
     return _audiusHost;
   })();
@@ -95,8 +104,7 @@ export function audiusStreamUrlSync(rawId){
 export function primeAudius(){ return audiusHost(); }
 
 async function audiusSearch(query, limit = 30){
-  const host = await audiusHost();
-  const url = `${host}/v1/tracks/search?query=${encodeURIComponent(query)}&app_name=${APP}&limit=${limit}`;
+  const url = `/api/audius/search?query=${encodeURIComponent(query)}&limit=${limit}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error('Audius search ' + r.status);
   const j = await r.json();
@@ -104,8 +112,7 @@ async function audiusSearch(query, limit = 30){
 }
 
 export async function audiusTrending({ genre, time = 'week', limit = 16 } = {}){
-  const host = await audiusHost();
-  let url = `${host}/v1/tracks/trending?app_name=${APP}&time=${time}`;
+  let url = `/api/audius/trending?time=${encodeURIComponent(time)}`;
   if (genre) url += `&genre=${encodeURIComponent(genre)}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error('Audius trending ' + r.status);
@@ -114,10 +121,8 @@ export async function audiusTrending({ genre, time = 'week', limit = 16 } = {}){
 }
 
 export async function audiusTrendingPlaylists(limit = 10){
-  const host = await audiusHost();
-  const url = `${host}/v1/playlists/trending?app_name=${APP}`;
   try {
-    const r = await fetch(url);
+    const r = await fetch('/api/audius/playlists/trending');
     if (!r.ok) throw new Error('' + r.status);
     const j = await r.json();
     return (j.data || []).slice(0, limit).map(p => ({
@@ -135,8 +140,7 @@ export async function audiusTrendingPlaylists(limit = 10){
 }
 
 export async function audiusPlaylistTracks(rawId, limit = 60){
-  const host = await audiusHost();
-  const url = `${host}/v1/playlists/${rawId}/tracks?app_name=${APP}`;
+  const url = `/api/audius/playlists/tracks?id=${encodeURIComponent(rawId)}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error('Audius playlist ' + r.status);
   const j = await r.json();
@@ -232,7 +236,7 @@ export async function radioTop(limit = 16){
 }
 
 async function itunesSearch(query, limit = 30){
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=${limit}`;
+  const url = `/api/itunes/search?q=${encodeURIComponent(query)}&limit=${limit}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error('iTunes search ' + r.status);
   const j = await r.json();

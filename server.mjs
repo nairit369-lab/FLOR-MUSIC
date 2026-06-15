@@ -254,17 +254,50 @@ const server = http.createServer(async (req, res) => {
     return json(404, { error: 'Неизвестный метод' });
   }
 
+  // ---- API: Audius / iTunes (proxied — works when the VPS blocks YouTube/SC) ----
+  if (urlPath.startsWith('/api/audius/') || urlPath === '/api/itunes/search'){
+    const params = new URL(req.url, 'http://x').searchParams;
+    const jsonOk = (obj) => { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
+    try {
+      if (urlPath === '/api/audius/host'){
+        return jsonOk({ host: await audiusGetHost() });
+      }
+      if (urlPath === '/api/audius/search'){
+        const query = params.get('query') || params.get('q') || '';
+        const limit = params.get('limit') || '30';
+        return jsonOk(await audiusProxy('/v1/tracks/search', { query, limit }));
+      }
+      if (urlPath === '/api/audius/trending'){
+        const p = { time: params.get('time') || 'week' };
+        const genre = params.get('genre'); if (genre) p.genre = genre;
+        return jsonOk(await audiusProxy('/v1/tracks/trending', p));
+      }
+      if (urlPath === '/api/audius/playlists/trending'){
+        return jsonOk(await audiusProxy('/v1/playlists/trending', {}));
+      }
+      if (urlPath === '/api/audius/playlists/tracks'){
+        const id = params.get('id') || '';
+        if (!id){ res.writeHead(400); return res.end('bad id'); }
+        return jsonOk(await audiusProxy(`/v1/playlists/${id}/tracks`, {}));
+      }
+      if (urlPath === '/api/itunes/search'){
+        const q = params.get('q') || '';
+        const limit = params.get('limit') || '30';
+        const r = await serverFetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&entity=song&limit=${limit}`);
+        return jsonOk(await r.json());
+      }
+    } catch (e){
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ data: [], results: [], error: e.message }));
+    }
+  }
+
   // ---- API: YouTube search (server-side, no key, no CORS) ----
   if (urlPath === '/api/yt/search'){
-    try {
-      const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
-      const items = await ytSearch(q);
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ items }));
-    } catch (e){
-      res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ items: [], error: e.message }));
-    }
+    const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
+    const items = await ytSearch(q).catch(() => []);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ items }));
   }
 
   // ---- API: YouTube AUDIO stream (proxied) ----
@@ -296,15 +329,10 @@ const server = http.createServer(async (req, res) => {
 
   // ---- API: SoundCloud search ----
   if (urlPath === '/api/sc/search'){
-    try {
-      const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
-      const items = await scSearch(q);
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ items }));
-    } catch (e){
-      res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ items: [], error: e.message }));
-    }
+    const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
+    const items = await scSearch(q).catch(() => []);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ items }));
   }
 
   // ---- API: SoundCloud stream (resolve + redirect to media) ----
@@ -360,12 +388,60 @@ const server = http.createServer(async (req, res) => {
 });
 
 /* ============================================================
+   Shared outbound fetch — some RU VPS hosts block YouTube /
+   SoundCloud but still reach Audius, iTunes and Invidious mirrors.
+   ============================================================ */
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
+
+async function serverFetch(url, opts = {}){
+  const r = await fetch(url, {
+    headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'en-US,en;q=0.9', ...(opts.headers || {}) },
+    signal: opts.signal || AbortSignal.timeout(opts.timeout || 12000),
+    ...opts,
+  });
+  if (!r.ok) throw new Error(`${url} → ${r.status}`);
+  return r;
+}
+
+/* ============================================================
+   Audius — proxied for search/trending on VPS where the browser
+   may not reach api.audius.co reliably.
+   ============================================================ */
+let audiusHost = null, audiusHostAt = 0;
+const AUDIUS_HOST_TTL = 30 * 60 * 1000;
+
+async function audiusGetHost(){
+  if (audiusHost && Date.now() - audiusHostAt < AUDIUS_HOST_TTL) return audiusHost;
+  const r = await serverFetch('https://api.audius.co');
+  const j = await r.json();
+  audiusHost = (j.data || []).filter(Boolean)[0] || 'https://discoveryprovider.audius.co';
+  audiusHostAt = Date.now();
+  return audiusHost;
+}
+
+async function audiusProxy(path, params){
+  const host = await audiusGetHost();
+  const qs = new URLSearchParams(params);
+  if (!qs.has('app_name')) qs.set('app_name', 'FLOR-Music');
+  const r = await serverFetch(`${host}${path}?${qs}`);
+  return r.json();
+}
+
+/* ============================================================
    YouTube search by scraping the public results page.
    No API key, no quota, no payment — runs server-side so there
    are no CORS issues. Results are cached briefly in memory.
    ============================================================ */
 const ytCache = new Map();   // q -> { at, items }
 const YT_TTL = 5 * 60 * 1000;
+const INVIDIOUS = [
+  'https://invidious.io',
+  'https://vid.puffyan.us',
+  'https://inv.tux.pizza',
+  'https://inv.nadeko.net',
+  'https://invidious.fdn.fr',
+  'https://yewtu.be',
+];
 
 function parseDuration(text){
   if (!text) return 0;
@@ -374,19 +450,37 @@ function parseDuration(text){
   return parts.reduce((a, n) => a * 60 + n, 0);
 }
 
-async function ytSearch(q){
-  q = (q || '').trim();
-  if (!q) return [];
-  const cached = ytCache.get(q);
-  if (cached && Date.now() - cached.at < YT_TTL) return cached.items;
+async function invidiousSearch(q){
+  for (const inst of INVIDIOUS){
+    try {
+      const r = await serverFetch(`${inst}/api/v1/search?q=${encodeURIComponent(q)}&type=video`, { timeout: 8000 });
+      const j = await r.json();
+      const items = [];
+      for (const v of (j || [])){
+        if (v.type !== 'video' || !v.videoId || !v.lengthSeconds) continue;
+        const thumb = (v.videoThumbnails || []).find(t => t.quality === 'medium')?.url
+          || (v.videoThumbnails || []).at(-1)?.url
+          || `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`;
+        items.push({
+          id: v.videoId,
+          title: v.title || 'YouTube',
+          author: (v.author || 'YouTube').replace(/ - Topic$/, ''),
+          duration: v.lengthSeconds,
+          thumb,
+        });
+        if (items.length >= 30) break;
+      }
+      if (items.length) return items;
+    } catch {}
+  }
+  return [];
+}
 
+async function ytSearchDirect(q){
   const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}&hl=en&gl=US`;
-  const r = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Cookie': 'CONSENT=YES+1; SOCS=CAI;',
-    },
+  const r = await serverFetch(url, {
+    headers: { Cookie: 'CONSENT=YES+1; SOCS=CAI;' },
+    timeout: 15000,
   });
   const html = await r.text();
   const m = html.match(/var ytInitialData = (\{.*?\});<\/script>/s) || html.match(/ytInitialData = (\{.*?\});/s);
@@ -401,7 +495,7 @@ async function ytSearch(q){
       const v = it.videoRenderer;
       if (!v || !v.videoId) continue;
       const dur = parseDuration(v.lengthText?.simpleText);
-      if (!dur) continue;                       // skip live / no-duration entries
+      if (!dur) continue;
       const thumbs = v.thumbnail?.thumbnails || [];
       items.push({
         id: v.videoId,
@@ -414,7 +508,19 @@ async function ytSearch(q){
     }
     if (items.length >= 30) break;
   }
-  if (items.length) ytCache.set(q, { at: Date.now(), items });   // never cache empty/failed scrapes
+  return items;
+}
+
+async function ytSearch(q){
+  q = (q || '').trim();
+  if (!q) return [];
+  const cached = ytCache.get(q);
+  if (cached && Date.now() - cached.at < YT_TTL) return cached.items;
+
+  let items = [];
+  try { items = await ytSearchDirect(q); } catch {}
+  if (!items.length) items = await invidiousSearch(q);
+  if (items.length) ytCache.set(q, { at: Date.now(), items });
   return items;
 }
 
@@ -473,17 +579,18 @@ const SC_CID_TTL = 6 * 60 * 60 * 1000;
 
 async function scGetClientId(){
   if (scClientId && Date.now() - scClientIdAt < SC_CID_TTL) return scClientId;
-  const html = await (await fetch('https://soundcloud.com/', { headers: { 'User-Agent': SC_UA } })).text();
-  const scripts = [...html.matchAll(/<script[^>]+src="([^"]+\.js[^"]*)"/g)].map(m => m[1]);
-  // The client_id lives in one of the bundled scripts — newest are last.
-  for (const src of scripts.reverse()){
-    try {
-      const js = await (await fetch(src, { headers: { 'User-Agent': SC_UA }, signal: AbortSignal.timeout(6000) })).text();
-      const m = js.match(/client_id\s*[:=]\s*"([a-zA-Z0-9]{20,40})"/);
-      if (m){ scClientId = m[1]; scClientIdAt = Date.now(); return scClientId; }
-    } catch {}
-  }
-  return scClientId;   // may be a stale-but-valid id
+  try {
+    const html = await (await serverFetch('https://soundcloud.com/', { headers: { 'User-Agent': SC_UA } })).text();
+    const scripts = [...html.matchAll(/<script[^>]+src="([^"]+\.js[^"]*)"/g)].map(m => m[1]);
+    for (const src of scripts.reverse()){
+      try {
+        const js = await (await serverFetch(src, { headers: { 'User-Agent': SC_UA }, timeout: 6000 })).text();
+        const m = js.match(/client_id\s*[:=]\s*"([a-zA-Z0-9]{20,40})"/);
+        if (m){ scClientId = m[1]; scClientIdAt = Date.now(); return scClientId; }
+      } catch {}
+    }
+  } catch {}
+  return scClientId;
 }
 
 function scArtwork(t){
@@ -496,25 +603,26 @@ async function scSearch(q){
   if (!q) return [];
   const cid = await scGetClientId();
   if (!cid) return [];
-  const url = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(q)}&limit=25&client_id=${cid}`;
-  const r = await fetch(url, { headers: { 'User-Agent': SC_UA }, signal: AbortSignal.timeout(8000) });
-  if (!r.ok) return [];
-  const j = await r.json();
-  const items = [];
-  for (const t of (j.collection || [])){
-    if (!t || t.kind !== 'track' || t.streamable === false) continue;
-    const hasProgressive = (t.media?.transcodings || []).some(x => x.format?.protocol === 'progressive');
-    if (!hasProgressive) continue;          // only keep tracks we can play via <audio>
-    items.push({
-      id: t.id,
-      title: t.title || 'SoundCloud',
-      author: t.user?.username || '',
-      duration: Math.round((t.duration || 0) / 1000),
-      thumb: scArtwork(t),
-    });
-    if (items.length >= 25) break;
-  }
-  return items;
+  try {
+    const url = `https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(q)}&limit=25&client_id=${cid}`;
+    const r = await serverFetch(url, { headers: { 'User-Agent': SC_UA }, timeout: 8000 });
+    const j = await r.json();
+    const items = [];
+    for (const t of (j.collection || [])){
+      if (!t || t.kind !== 'track' || t.streamable === false) continue;
+      const hasProgressive = (t.media?.transcodings || []).some(x => x.format?.protocol === 'progressive');
+      if (!hasProgressive) continue;
+      items.push({
+        id: t.id,
+        title: t.title || 'SoundCloud',
+        author: t.user?.username || '',
+        duration: Math.round((t.duration || 0) / 1000),
+        thumb: scArtwork(t),
+      });
+      if (items.length >= 25) break;
+    }
+    return items;
+  } catch { return []; }
 }
 
 async function scStreamUrl(trackId){

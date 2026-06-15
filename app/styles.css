@@ -63,7 +63,14 @@
 
 /* ---------- Reset ---------- */
 *{ box-sizing: border-box; margin:0; padding:0; }
-html,body{ height:100%; }
+html,body{
+  height:100%;
+  /* App-like touch: no double-tap zoom, no pinch, no page rubber-band */
+  touch-action: manipulation;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
 body{
   font-family: var(--font);
   background: var(--bg-grad);
@@ -71,6 +78,12 @@ body{
   -webkit-font-smoothing: antialiased;
   letter-spacing: -0.01em;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+input, textarea, [contenteditable="true"]{
+  user-select: text;
+  -webkit-user-select: text;
 }
 button{ font-family: inherit; cursor: pointer; border:none; background:none; color: inherit; }
 input{ font-family: inherit; }

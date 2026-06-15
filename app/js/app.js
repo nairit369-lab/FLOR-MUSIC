@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=6';
-import { player } from './player.js?v=6';
+import { I } from './icons.js?v=8';
+import { player } from './player.js?v=8';
 import {
   SOURCES, search as apiSearch, primeAudius,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=6';
+} from './api.js?v=8';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1594,7 +1594,19 @@ function toast(msg){
 /* ============================================================
    Init
    ============================================================ */
+function lockAppGestures(){
+  // iOS standalone: block pinch / double-tap page zoom
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']){
+    document.addEventListener(ev, e => e.preventDefault(), { passive: false });
+  }
+  document.addEventListener('touchmove', e => {
+    if (e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
+}
+
 function init(){
+  lockAppGestures();
   let t = 'dark'; try { t = localStorage.getItem('flor-theme') || 'dark'; } catch {}
   document.documentElement.dataset.theme = t;
   $('#brandMark').innerHTML = logoImg(34);
