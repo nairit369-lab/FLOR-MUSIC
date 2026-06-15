@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=16';
-import { player } from './player.js?v=16';
+import { I } from './icons.js?v=17';
+import { player } from './player.js?v=17';
 import {
   SOURCES, search as apiSearch, primeAudius, loadProxyConfig, homeWaveTracks,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=16';
+} from './api.js?v=17';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1742,6 +1742,67 @@ function closeFS(){ $('#fsplayer').classList.remove('open'); document.body.class
 function updateYtMode(){
   document.body.classList.toggle('yt-mode', player.mode === 'yt' && !!player.current);
 }
+
+const _artColorCache = new Map();
+const ART_PALETTE = [
+  [108,60,224], [224,164,88], [255,143,81], [78,200,192],
+  [199,125,255], [162,62,108], [45,90,180], [230,90,120],
+];
+
+function gradTint(track){
+  const key = track?.id || track?.title || '';
+  let h = 0; for (const c of String(key)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const [r, g, b] = ART_PALETTE[h % ART_PALETTE.length];
+  return { r, g, b };
+}
+
+function extractArtColor(url, track){
+  const cacheKey = url || track?.id || '';
+  if (_artColorCache.has(cacheKey)) return Promise.resolve(_artColorCache.get(cacheKey));
+  if (!url) return Promise.resolve(gradTint(track));
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.referrerPolicy = 'no-referrer';
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas');
+        const s = 28;
+        c.width = s; c.height = s;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, s, s);
+        const data = ctx.getImageData(0, 0, s, s).data;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let i = 0; i < data.length; i += 4){
+          if (data[i + 3] < 140) continue;
+          const pr = data[i], pg = data[i + 1], pb = data[i + 2];
+          const sum = pr + pg + pb;
+          if (sum < 55 || sum > 700) continue;
+          r += pr; g += pg; b += pb; n++;
+        }
+        const col = n ? { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) } : gradTint(track);
+        _artColorCache.set(cacheKey, col);
+        resolve(col);
+      } catch { resolve(gradTint(track)); }
+    };
+    img.onerror = () => resolve(gradTint(track));
+    img.src = url;
+  });
+}
+
+function applyTrackTint(track, root){
+  if (!root || !track) return;
+  const url = track.artwork || track.artworkFallbacks?.[0];
+  extractArtColor(url, track).then(({ r, g, b }) => {
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    root.style.setProperty('--fs-tint', `rgb(${r},${g},${b})`);
+    root.style.setProperty('--fs-tint-soft', `rgba(${r},${g},${b},0.34)`);
+    root.style.setProperty('--fs-tint-border', `rgba(${r},${g},${b},0.62)`);
+    root.style.setProperty('--fs-tint-glow', `rgba(${r},${g},${b},0.42)`);
+    root.style.setProperty('--fs-on-tint', lum > 0.68 ? '#1a1028' : '#ffffff');
+  });
+}
+
 function syncFS(){
   const c = player.current; if (!c) return;
   const fsCover = $('#fsCover'); fsCover.className = 'fs-cover ' + gradClass(c); fsCover.innerHTML = coverImg(c);
@@ -1757,6 +1818,8 @@ function syncFS(){
   if (fsAdd) fsAdd.innerHTML = I.plus;
   const amb = $('#fsAmbient'); amb.className = 'ambient ' + gradClass(c);
   amb.style.backgroundImage = c.artwork ? `url("${c.artwork}")` : '';
+  applyTrackTint(c, $('#fsplayer'));
+  applyTrackTint(c, $('.player'));
   $('#fsPlay').innerHTML = player.playing ? I.pause : I.play;
   $('#fsShuffle').classList.toggle('on', player.shuffle);
   $('#fsRepeat').classList.toggle('on', player.repeat !== 'off');
@@ -1895,6 +1958,7 @@ async function init(){
 
   // fullscreen controls
   $('#fsClose').addEventListener('click', closeFS);
+  $('#fsMinimize').addEventListener('click', closeFS);
   $('#fsPlay').addEventListener('click', () => player.toggle());
   $('#fsPrev').addEventListener('click', () => player.prev());
   $('#fsNext').addEventListener('click', () => player.next());

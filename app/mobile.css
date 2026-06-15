@@ -211,8 +211,7 @@
   .np-left .npc{ width:44px; height:44px; border-radius:10px; }
   .np-left .npmeta{ min-width:0; }
   .np-like, .np-addpl{ flex:none; }
-  .np-addpl{ width:36px; height:36px; border-radius:50%; display:grid; place-items:center; color:var(--accent-2); background:var(--accent-soft); border:none; cursor:pointer; }
-  .np-addpl svg{ width:19px; height:19px; }
+  .np-addpl{ width:36px; height:36px; border:1.5px solid var(--fs-tint-border, rgba(108,60,224,.45)); background:var(--fs-tint-soft, var(--accent-soft)); color:var(--fs-on-tint, var(--accent-2)); box-shadow:0 4px 14px var(--fs-tint-glow, rgba(108,60,224,.25)); }
   .np-right{ display:none; }
   .np-center{ flex:none; width:auto; max-width:none; flex-direction:row; gap:0; }
   .np-controls{ gap:0; }
@@ -240,19 +239,27 @@
   /* full-screen player → single column sheet */
   .fsplayer{ grid-template-columns:1fr; }
   .fs-right{ display:none; }
-  .fs-left{ justify-content:center; align-items:center; padding:64px 24px 40px; gap:0; }
-  .fs-cover{ width:min(58vw,280px); }
-  .fs-trackinfo{ width:min(80vw,330px); margin-top:26px; text-align:center; }
-  .fs-trackinfo .tt{ font-size:23px; }
-  .fs-trackinfo .ta{ font-size:15px; }
-  .fs-track-actions{ margin-top:16px; }
-  .fs-like, .fs-addpl{ width:48px; height:48px; }
-  .fs-progress{ width:min(80vw,330px); margin-top:22px; }
-  .fs-controls{ margin-top:24px; gap:22px; }
-  .fs-controls .fs-play{ width:62px; height:62px; }
+  .fs-left{ justify-content:flex-start; align-items:center; padding: calc(56px + env(safe-area-inset-top, 0px)) 24px calc(40px + env(safe-area-inset-bottom, 0px)); gap:0; }
+  .fs-cover{ width:min(58vw,280px); margin-top:8px; }
+  .fs-trackinfo{ width:min(86vw,340px); margin-top:22px; text-align:center; }
+  .fs-trackinfo .tt{ font-size:22px; line-height:1.2; }
+  .fs-trackinfo .ta{ font-size:15px; margin-top:8px; }
+  .fs-track-actions{ margin-top:18px; gap:18px; }
+  .fs-like, .fs-addpl{ width:50px; height:50px; }
+  .fs-progress{ width:min(86vw,340px); margin-top:20px; }
+  .fs-controls{ margin-top:22px; gap:22px; }
+  .fs-controls .fs-play{ width:62px; height:62px; background:#fff !important; color:#111 !important; }
   .fs-controls .fs-play svg{ width:26px; height:26px; }
   .fs-controls button svg{ width:23px; height:23px; }
-  .fs-close{ top:16px; right:16px; }
+  .fs-close{
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    left:50%; right:auto; transform:translateX(-50%);
+    padding:10px 20px 10px 16px;
+    box-shadow:0 8px 28px rgba(0,0,0,.35);
+  }
+  .fs-close-label{ display:inline; }
+  .fs-minimize{ display:inline-flex; align-items:center; justify-content:center; }
+  .fs-close:active{ transform: translateX(-50%) scale(.96); }
 
   /* notifications panel as centered top sheet */
   .notif-panel{ position:fixed; top: calc(14px + env(safe-area-inset-top, 0px)); left:12px; right:12px; width:auto; max-height:70vh; z-index:300; }

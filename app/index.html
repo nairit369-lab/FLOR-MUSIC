@@ -14,8 +14,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="FLOR MUSIC">
 <meta name="format-detection" content="telephone=no">
-<link rel="stylesheet" href="styles.css?v=16">
-<link rel="stylesheet" href="mobile.css?v=16">
+<link rel="stylesheet" href="styles.css?v=17">
+<link rel="stylesheet" href="mobile.css?v=17">
 </head>
 <body>
 <div class="app" id="app">
@@ -141,7 +141,10 @@
 <!-- ===== Fullscreen player ===== -->
 <div class="fsplayer" id="fsplayer">
   <div class="ambient" id="fsAmbient"></div>
-  <button class="fs-close" id="fsClose" title="Свернуть плеер"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+  <button class="fs-close" id="fsClose" title="Свернуть плеер" aria-label="Свернуть плеер">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    <span class="fs-close-label">Свернуть</span>
+  </button>
 
   <div class="fs-left">
     <div class="fs-cover" id="fsCover"></div>
@@ -164,6 +167,7 @@
       <button id="fsNext"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 5a1 1 0 0 0-2 0v5.2L6.5 4.7A1 1 0 0 0 5 5.6v12.8a1 1 0 0 0 1.5.87L16 13.8V19a1 1 0 0 0 2 0z"/></svg></button>
       <button id="fsRepeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></button>
     </div>
+    <button class="fs-minimize" id="fsMinimize" type="button">Свернуть плеер</button>
   </div>
 
   <div class="fs-right">
@@ -193,6 +197,6 @@
   <div class="modal" id="modalBox"></div>
 </div>
 
-<script type="module" src="js/app.js?v=16"></script>
+<script type="module" src="js/app.js?v=17"></script>
 </body>
 </html>
