@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=15';
-import { player } from './player.js?v=15';
+import { I } from './icons.js?v=16';
+import { player } from './player.js?v=16';
 import {
   SOURCES, search as apiSearch, primeAudius, loadProxyConfig, homeWaveTracks,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=15';
+} from './api.js?v=16';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -942,14 +942,17 @@ function renderMPlaylist(ctx){
   back.appendChild(bb); w.appendChild(back);
 
   const hero = el('div', 'm-pl-hero');
-  const coverInner = isLiked
-    ? `<div style="width:100%;height:100%;display:grid;place-items:center;background:linear-gradient(135deg,#A78BFA,#6C3CE0)">${mIc('heartFill', 64, '#fff')}</div>`
-    : (userPl ? coverImg(firstCover(userPl)) : coverImg(ctx));
-  hero.innerHTML = `<div class="m-pl-cover ${gradClass(userPl || ctx)}">${coverInner}</div>
-    <div class="m-pl-kind">${esc(userPl ? 'ВАШ ПЛЕЙЛИСТ' : (ctx.kind || 'Плейлист')).toUpperCase()}</div>
-    <div class="m-pl-title">${esc(title)}</div>
-    <div class="m-pl-desc">${esc(ctx.desc || ctx.subtitle || '')}</div>
-    <div class="m-pl-stats" id="mPlCount">…</div>
+  const coverBlock = isLiked
+    ? `<div class="m-pl-cover liked"><div class="m-pl-cover-fallback">${mIc('heartFill', 64, '#fff')}</div></div>`
+    : mCover(userPl ? firstCover(userPl) : ctx, 188, 18);
+  const desc = ctx.desc || ctx.subtitle || '';
+  hero.innerHTML = `${coverBlock}
+    <div class="m-pl-meta">
+      <div class="m-pl-kind">${esc(userPl ? 'Ваш плейлист' : (ctx.kind || 'Плейлист'))}</div>
+      <div class="m-pl-title">${esc(title)}</div>
+      ${desc ? `<div class="m-pl-desc">${esc(desc)}</div>` : ''}
+      <div class="m-pl-stats" id="mPlCount">…</div>
+    </div>
     <div class="m-pl-actions">
       <div class="sm" id="mPlShuf">${mIc('shuffle', 22)}</div>
       <button class="m-pl-play" id="mPlPlay">${mIc('play', 26, '#fff')}</button>

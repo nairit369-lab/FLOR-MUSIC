@@ -3,7 +3,7 @@
    - HTML5 <audio> for Audius / iTunes / Radio
    - Official YouTube IFrame Player for YouTube (full songs, no key)
    ============================================================ */
-import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=15';
+import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=16';
 
 class Player {
   constructor(){

@@ -598,7 +598,8 @@ input{ font-family: inherit; }
 .pl-cover img.cover-img,
 .qc img.cover-img,
 .fs-cover img.cover-img,
-.big-cover img.cover-img{
+.big-cover img.cover-img,
+.m-pl-hero > .cv img.cover-img{
   width:100%; height:100%; object-fit:cover; display:block; border-radius:inherit;
   opacity:0; transition:opacity .4s var(--ease);
 }
@@ -608,7 +609,8 @@ input{ font-family: inherit; }
 .pl-cover img.cover-img.loaded,
 .qc img.cover-img.loaded,
 .fs-cover img.cover-img.loaded,
-.big-cover img.cover-img.loaded{ opacity:1; }
+.big-cover img.cover-img.loaded,
+.m-pl-hero > .cv img.cover-img.loaded{ opacity:1; }
 .art, .tcover, .npc, .pl-cover, .qc{ background-size:cover; background-position:center; }
 .ambient{ background-size:cover; background-position:center; }
 
