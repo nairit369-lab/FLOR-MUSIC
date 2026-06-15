@@ -3,7 +3,7 @@
    - HTML5 <audio> for Audius / iTunes / Radio
    - Official YouTube IFrame Player for YouTube (full songs, no key)
    ============================================================ */
-import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=11';
+import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=13';
 
 class Player {
   constructor(){
@@ -160,6 +160,7 @@ class Player {
       if (this.ytReady && this.yt){ this.yt.loadVideoById(track.rawId); this.yt.setVolume(this._volume * 100); }
       else { this._pendingYT = { rawId: track.rawId, autoplay }; }
       this._startYTPoll();
+      this._ytLoadTimer = setTimeout(() => { if (this.loading && this.mode === 'yt') this._onError(); }, 18000);
       return;
     }
 
@@ -171,22 +172,26 @@ class Player {
     this._emit('change'); this._emit('state');
 
     try {
-      let src = track.streamUrl;
-      // Prefer the synchronous URL so play() fires inside the user's tap (mobile).
-      if (!src && track.source === 'audius'){
-        src = audiusStreamUrlSync(track.rawId);
-        if (src) track.streamUrl = src;
-      }
-      if (!src && track.source === 'audius'){
-        src = await audiusStreamUrl(track.rawId);
-        if (token !== this._loadToken) return;
-        track.streamUrl = src;
-      }
-      if (!src && track.source === 'soundcloud'){
-        src = await soundcloudStreamUrl(track.rawId);
-        if (token !== this._loadToken) return;
-        track.streamUrl = src;
-      }
+      const resolveSrc = async () => {
+        let src = track.streamUrl;
+        if (!src && track.source === 'audius'){
+          src = audiusStreamUrlSync(track.rawId);
+          if (src) track.streamUrl = src;
+        }
+        if (!src && track.source === 'audius'){
+          src = await audiusStreamUrl(track.rawId);
+          track.streamUrl = src;
+        }
+        if (!src && track.source === 'soundcloud'){
+          src = await soundcloudStreamUrl(track.rawId);
+          track.streamUrl = src;
+        }
+        return src;
+      };
+      const src = await Promise.race([
+        resolveSrc(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000)),
+      ]);
       if (token !== this._loadToken) return;
       if (!src) throw new Error('no source');
       this.audio.src = src;
@@ -253,7 +258,7 @@ class Player {
     });
   }
   _startYTPoll(){ this._stopYTPoll(); this._ytPoll = setInterval(() => { if (this.mode === 'yt') this._emit('progress'); }, 500); }
-  _stopYTPoll(){ if (this._ytPoll){ clearInterval(this._ytPoll); this._ytPoll = null; } }
+  _stopYTPoll(){ if (this._ytPoll){ clearInterval(this._ytPoll); this._ytPoll = null; } if (this._ytLoadTimer){ clearTimeout(this._ytLoadTimer); this._ytLoadTimer = null; } }
 
   /* ---------- media session ---------- */
   _updateMediaSession(track){

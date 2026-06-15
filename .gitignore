@@ -1,5 +1,6 @@
 # Секреты и данные сервера (только на VDS, не в Git)
 email-config.json
+proxy-config.json
 users.json
 avatars/
 

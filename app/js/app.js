@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=11';
-import { player } from './player.js?v=11';
+import { I } from './icons.js?v=13';
+import { player } from './player.js?v=13';
 import {
-  SOURCES, search as apiSearch, primeAudius,
+  SOURCES, search as apiSearch, primeAudius, loadProxyConfig, homeWaveTracks,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=11';
+} from './api.js?v=13';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -271,12 +271,15 @@ async function fillHome(host){
   if (state.home || state.homeLoading) return;
   state.homeLoading = true;
   try {
-    // Audius content loads first (fast) so the home never waits on radio.
+    const slice = (p, ms = 10000) => Promise.race([
+      p,
+      new Promise(resolve => setTimeout(() => resolve([]), ms)),
+    ]);
     const [trending, plists, electronic, hiphop] = await Promise.all([
-      audiusTrending({ limit: 14 }),
-      audiusTrendingPlaylists(10),
-      audiusTrending({ genre: 'Electronic', limit: 12 }),
-      audiusTrending({ genre: 'Hip-Hop/Rap', limit: 12 }),
+      homeWaveTracks(14),
+      slice(audiusTrendingPlaylists(10)),
+      slice(audiusTrending({ genre: 'Electronic', limit: 12 })),
+      slice(audiusTrending({ genre: 'Hip-Hop/Rap', limit: 12 })),
     ]);
     state.home = {
       trending, playlists: plists,
@@ -288,7 +291,9 @@ async function fillHome(host){
     };
     buildNotifications();
   } catch (e){
-    console.warn(e); toast('Не удалось загрузить главную — проверьте интернет');
+    console.warn(e);
+    state.home = { trending: [], playlists: [], genres: [], radio: [] };
+    toast('Часть источников недоступна — показываем что удалось загрузить');
   } finally {
     state.homeLoading = false;
     if (state.screen === 'home') render();
@@ -613,18 +618,24 @@ function ensureHomeData(){
   state.homeLoading = true;
   (async () => {
     try {
+      const slice = (p, ms = 10000) => Promise.race([
+        p,
+        new Promise(resolve => setTimeout(() => resolve([]), ms)),
+      ]);
       const [trending, plists, electronic, hiphop] = await Promise.all([
-        audiusTrending({ limit: 14 }),
-        audiusTrendingPlaylists(10),
-        audiusTrending({ genre: 'Electronic', limit: 12 }),
-        audiusTrending({ genre: 'Hip-Hop/Rap', limit: 12 }),
+        homeWaveTracks(14),
+        slice(audiusTrendingPlaylists(10)),
+        slice(audiusTrending({ genre: 'Electronic', limit: 12 })),
+        slice(audiusTrending({ genre: 'Hip-Hop/Rap', limit: 12 })),
       ]);
       state.home = { trending, playlists: plists,
         genres: [{ label: 'Электроника в тренде', tracks: electronic }, { label: 'Hip-Hop в тренде', tracks: hiphop }],
         radio: [] };
       buildNotifications();
-    } catch (e){ console.warn(e); }
-    finally { state.homeLoading = false; if (state.screen === 'home') render(); }
+    } catch (e){
+      console.warn(e);
+      state.home = { trending: [], playlists: [], genres: [], radio: [] };
+    } finally { state.homeLoading = false; if (state.screen === 'home') render(); }
     radioTop(12).then(radio => { if (state.home && radio.length){ state.home.radio = radio; if (state.screen === 'home') render(); } }).catch(() => {});
   })();
 }
@@ -721,7 +732,10 @@ function renderMHome(){
   if (state.home?.playlists?.length) w.appendChild(mRow('Собрано для вас', state.home.playlists, 'playlist'));
   (state.home?.genres || []).forEach(g => { if (g.tracks?.length) w.appendChild(mRow(g.label, g.tracks, 'track')); });
   if (state.home?.radio?.length) w.appendChild(mRow('Популярное радио', state.home.radio, 'track'));
-  if (!state.home){ const sp = centerState({ spinner: true, title: 'Загружаем музыку…' }); w.appendChild(sp); }
+  if (state.homeLoading) w.appendChild(centerState({ spinner: true, title: 'Загружаем…' }));
+  else if (!state.home?.trending?.length && !state.home?.playlists?.length && !state.home?.radio?.length){
+    w.appendChild(centerState({ title: 'Пока нет треков', sub: 'Попробуйте поиск или радио ниже' }));
+  }
   return w;
 }
 
@@ -968,7 +982,10 @@ async function runSearch(q){
   if (state.screen === 'search') refreshSearchResults();
   const token = ++searchToken;
   try {
-    const res = await apiSearch(q, state.source, 40);
+    const res = await Promise.race([
+      apiSearch(q, state.source, 40),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000)),
+    ]);
     if (token !== searchToken) return;
     state.results = res;
   } catch (e){
@@ -1619,6 +1636,7 @@ function init(){
 
   // re-render when crossing the mobile/desktop breakpoint
   let wasMobile = isMobile();
+  loadProxyConfig();
   primeAudius();   // warm the Audius host so the first tap can play synchronously
   fetch('/api/health').catch(() => {
     const onPhone = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';

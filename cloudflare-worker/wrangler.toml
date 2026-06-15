@@ -1,0 +1,5 @@
+name = "flor-music-proxy"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+
+# После деплоя URL будет: https://flor-music-proxy.<ваш-аккаунт>.workers.dev

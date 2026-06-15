@@ -54,6 +54,9 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
    ============================================================ */
 let emailCfg = {};
 try { emailCfg = JSON.parse(readFileSync(join(__dirname, 'email-config.json'), 'utf8')) || {}; } catch { emailCfg = {}; }
+let proxyCfg = {};
+try { proxyCfg = JSON.parse(readFileSync(join(__dirname, 'proxy-config.json'), 'utf8')) || {}; } catch { proxyCfg = {}; }
+const PROXY = { workerUrl: (process.env.CF_WORKER_URL || proxyCfg.workerUrl || '').trim().replace(/\/$/, '') };
 const EMAIL = {
   smtpHost: (process.env.SMTP_HOST || emailCfg.smtpHost || 'smtp.gmail.com').trim(),
   smtpPort: Number(process.env.SMTP_PORT || emailCfg.smtpPort || 465),
@@ -226,6 +229,12 @@ const server = http.createServer(async (req, res) => {
   if (urlPath === '/api/health'){
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ ok: true }));
+  }
+
+  // ---- API: public config (Cloudflare Worker URL for music proxy) ----
+  if (urlPath === '/api/config'){
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ workerUrl: PROXY.workerUrl || null }));
   }
 
   // ---- API: user avatar (GET) ----
@@ -497,12 +506,30 @@ async function serverFetch(url, opts = {}){
    ============================================================ */
 let audiusHost = null, audiusHostAt = 0;
 const AUDIUS_HOST_TTL = 30 * 60 * 1000;
+// api.audius.co часто отдаёт 403 с RU VPS — пробуем зеркала напрямую.
+const AUDIUS_MIRRORS = [
+  'https://discoveryprovider.audius.co',
+  'https://audius-mainnet.cultur3stake.com',
+  'https://audius-discovery-1.altego.net',
+  'https://audius-discovery-2.altego.net',
+];
 
 async function audiusGetHost(){
   if (audiusHost && Date.now() - audiusHostAt < AUDIUS_HOST_TTL) return audiusHost;
-  const r = await serverFetch('https://api.audius.co');
-  const j = await r.json();
-  audiusHost = (j.data || []).filter(Boolean)[0] || 'https://discoveryprovider.audius.co';
+  try {
+    const r = await serverFetch('https://api.audius.co', { timeout: 6000 });
+    const j = await r.json();
+    const hosts = (j.data || []).filter(Boolean);
+    if (hosts.length){ audiusHost = hosts[0]; audiusHostAt = Date.now(); return audiusHost; }
+  } catch {}
+  for (const h of AUDIUS_MIRRORS){
+    try {
+      await serverFetch(`${h}/v1/tracks/trending?app_name=FLOR-Music&limit=1`, { timeout: 8000 });
+      audiusHost = h; audiusHostAt = Date.now();
+      return audiusHost;
+    } catch {}
+  }
+  audiusHost = AUDIUS_MIRRORS[0];
   audiusHostAt = Date.now();
   return audiusHost;
 }
@@ -523,6 +550,8 @@ async function audiusProxy(path, params){
 const ytCache = new Map();   // q -> { at, items }
 const YT_TTL = 5 * 60 * 1000;
 const INVIDIOUS = [
+  'https://invidious.ducks.party',
+  'https://invidious.privacyredirect.com',
   'https://invidious.io',
   'https://vid.puffyan.us',
   'https://inv.tux.pizza',
@@ -617,6 +646,7 @@ async function ytSearch(q){
    via public Piped instances (hosted abroad → not Google-blocked).
    ============================================================ */
 const PIPED = [
+  'https://api.piped.private.coffee',
   'https://pipedapi.kavin.rocks',
   'https://pipedapi.adminforge.de',
   'https://pipedapi.leptons.xyz',
@@ -761,6 +791,7 @@ function listen(port, attemptsLeft = 10){
     else if (EMAIL.brevoKey) console.log(`  [EMAIL] Brevo, from: ${EMAIL.from || '(не указан!)'}`);
     else if (EMAIL.resendKey) console.log(`  [EMAIL] Resend, from: ${EMAIL.from || '(не указан!)'}`);
     else console.log('  [EMAIL] не настроена — коды выводятся в консоль сервера');
+    if (PROXY.workerUrl) console.log(`  [PROXY] Cloudflare Worker → ${PROXY.workerUrl}`);
     const lan = lanUrls(port);
     if (lan.length){
       console.log('  С телефона откройте один из адресов:');

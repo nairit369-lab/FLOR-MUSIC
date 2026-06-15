@@ -7,6 +7,52 @@
 
 const APP = 'FLOR-Music';
 
+/* ============================================================
+   Cloudflare Worker proxy (optional) — bypasses RU VPS blocks.
+   URL задаётся в proxy-config.json на сервере → /api/config
+   ============================================================ */
+let _proxyBase = null;
+let _proxyReady = false;
+
+export async function loadProxyConfig(){
+  if (_proxyReady) return _proxyBase;
+  _proxyReady = true;
+  try {
+    const r = await timedFetch('/api/config', {}, 4000);
+    if (r.ok){
+      const j = await r.json();
+      _proxyBase = (j.workerUrl || '').replace(/\/$/, '') || null;
+    }
+  } catch {}
+  return _proxyBase;
+}
+
+async function proxyGet(path, params = {}, ms = 10000){
+  const base = _proxyBase || await loadProxyConfig();
+  if (!base) return null;
+  const qs = new URLSearchParams(params).toString();
+  const url = `${base}${path}${qs ? '?' + qs : ''}`;
+  const r = await timedFetch(url, {}, ms);
+  if (!r.ok) return null;
+  return r.json();
+}
+
+/* Abort hung requests — without this the UI spinner never stops on slow/blocked APIs. */
+async function timedFetch(url, opts = {}, ms = 8000){
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally { clearTimeout(id); }
+}
+
+async function withTimeout(promise, ms, fallback){
+  let timer;
+  const timeout = new Promise(resolve => { timer = setTimeout(() => resolve(fallback), ms); });
+  try { return await Promise.race([promise, timeout]); }
+  finally { clearTimeout(timer); }
+}
+
 /* ---------- Source registry (drives the search tabs / profile) ---------- */
 export const SOURCES = [
   { id:'all',     name:'Все источники', color:'var(--accent-2)', kind:'meta' },
@@ -28,18 +74,24 @@ async function audiusHost(){
   if (_audiusHostPromise) return _audiusHostPromise;
   _audiusHostPromise = (async () => {
     try {
-      const r = await fetch('/api/audius/host');
-      if (r.ok){
-        const j = await r.json();
-        _audiusHost = j.host || null;
-      }
+      const pj = await proxyGet('/audius/host', {}, 6000);
+      if (pj?.host) _audiusHost = pj.host;
     } catch {}
     if (!_audiusHost){
       try {
-        const r = await fetch('https://api.audius.co');
+        const r = await timedFetch('/api/audius/host', {}, 6000);
+        if (r.ok){
+          const j = await r.json();
+          _audiusHost = j.host || null;
+        }
+      } catch {}
+    }
+    if (!_audiusHost){
+      try {
+        const r = await timedFetch('https://api.audius.co', {}, 5000);
         const j = await r.json();
         const hosts = (j.data || []).filter(Boolean);
-        _audiusHost = hosts[Math.floor(Math.random() * Math.min(hosts.length, 3))] || hosts[0] || 'https://discoveryprovider.audius.co';
+        _audiusHost = hosts[0] || 'https://discoveryprovider.audius.co';
       } catch {
         _audiusHost = 'https://discoveryprovider.audius.co';
       }
@@ -107,14 +159,17 @@ async function audiusDirect(path, params){
   const host = await audiusHost();
   const qs = new URLSearchParams(params);
   if (!qs.has('app_name')) qs.set('app_name', APP);
-  const r = await fetch(`${host}${path}?${qs}`);
+  const r = await timedFetch(`${host}${path}?${qs}`, {}, 10000);
   if (!r.ok) throw new Error('Audius ' + r.status);
   return r.json();
 }
 
 async function audiusFromServer(path, params){
+  const proxyPath = '/audius/' + path;
+  const pj = await proxyGet(proxyPath, params, 10000);
+  if (pj && (pj.data || pj.results)) return pj;
   const qs = new URLSearchParams(params).toString();
-  const r = await fetch(`/api/audius/${path}?${qs}`);
+  const r = await timedFetch(`/api/audius/${path}?${qs}`, {}, 10000);
   if (!r.ok) throw new Error('Audius proxy ' + r.status);
   return r.json();
 }
@@ -263,8 +318,10 @@ export async function radioTop(limit = 16){
 }
 
 async function itunesSearch(query, limit = 30){
+  const pj = await proxyGet('/itunes/search', { q: query, limit }, 8000);
+  if (pj?.results?.length) return (pj.results).map(normalizeItunes).filter(Boolean);
   const url = `/api/itunes/search?q=${encodeURIComponent(query)}&limit=${limit}`;
-  const r = await fetch(url);
+  const r = await timedFetch(url, {}, 8000);
   if (!r.ok) throw new Error('iTunes search ' + r.status);
   const j = await r.json();
   return (j.results || []).map(normalizeItunes).filter(Boolean);
@@ -297,12 +354,7 @@ function normalizeYoutube(v){
 const INVIDIOUS_CLIENT = [
   'https://invidious.ducks.party',
   'https://invidious.privacyredirect.com',
-  'https://invidious.io',
   'https://vid.puffyan.us',
-  'https://inv.tux.pizza',
-  'https://inv.nadeko.net',
-  'https://invidious.fdn.fr',
-  'https://yewtu.be',
 ];
 
 const PIPED_CLIENT = [
@@ -316,7 +368,7 @@ const PIPED_CLIENT = [
 async function invidiousClientSearch(query, limit = 30){
   for (const inst of INVIDIOUS_CLIENT){
     try {
-      const r = await fetch(`${inst}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, { signal: AbortSignal.timeout(10000) });
+      const r = await timedFetch(`${inst}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, {}, 6000);
       if (!r.ok) continue;
       const j = await r.json();
       const items = [];
@@ -341,9 +393,11 @@ async function invidiousClientSearch(query, limit = 30){
 }
 
 export async function youtubePipedAudioUrl(rawId){
+  const pj = await proxyGet('/yt/audio', { id: rawId }, 12000);
+  if (pj?.url) return pj.url;
   for (const inst of PIPED_CLIENT){
     try {
-      const r = await fetch(`${inst}/streams/${rawId}`, { signal: AbortSignal.timeout(12000) });
+      const r = await timedFetch(`${inst}/streams/${rawId}`, {}, 10000);
       if (!r.ok) continue;
       const j = await r.json();
       const audios = (j.audioStreams || []).filter(a => a && a.url);
@@ -359,10 +413,12 @@ export async function youtubePipedAudioUrl(rawId){
 }
 
 async function youtubeSearch(query, limit = 30){
+  const pj = await proxyGet('/yt/search', { q: query }, 10000);
+  if (pj?.items?.length) return pj.items.slice(0, limit).map(normalizeYoutube).filter(Boolean);
   const client = await invidiousClientSearch(query, limit);
   if (client.length) return client;
   try {
-    const r = await fetch(`/api/yt/search?q=${encodeURIComponent(query)}`);
+    const r = await timedFetch(`/api/yt/search?q=${encodeURIComponent(query)}`, {}, 8000);
     if (!r.ok) throw new Error('YouTube search ' + r.status);
     const j = await r.json();
     return (j.items || []).slice(0, limit).map(normalizeYoutube).filter(Boolean);
@@ -379,17 +435,17 @@ const SC_CID_TTL = 6 * 60 * 60 * 1000;
 
 async function scGetClientId(){
   if (_scClientId && Date.now() - _scClientIdAt < SC_CID_TTL) return _scClientId;
-  const html = await (await fetch('https://soundcloud.com/', { headers: { 'User-Agent': SC_UA } })).text();
+  const html = await (await timedFetch('https://soundcloud.com/', { headers: { 'User-Agent': SC_UA } }, 8000)).text();
   const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(m => m[1]);
   const patterns = [
     /client_id\s*[:=]\s*"([a-zA-Z0-9]{20,40})"/,
     /client_id\s*[:=]\s*'([a-zA-Z0-9]{20,40})'/,
     /"client_id"\s*:\s*"([a-zA-Z0-9]{20,40})"/,
   ];
-  for (const src of scripts.reverse()){
+  for (const src of scripts.reverse().slice(0, 6)){
     try {
       const url = src.startsWith('http') ? src : 'https://soundcloud.com' + src;
-      const js = await (await fetch(url, { headers: { 'User-Agent': SC_UA }, signal: AbortSignal.timeout(8000) })).text();
+      const js = await (await timedFetch(url, { headers: { 'User-Agent': SC_UA } }, 5000)).text();
       for (const p of patterns){
         const m = js.match(p);
         if (m){ _scClientId = m[1]; _scClientIdAt = Date.now(); return _scClientId; }
@@ -419,7 +475,7 @@ function scMapTrack(t){
 async function scClientSearch(query, limit = 30){
   const cid = await scGetClientId();
   if (!cid) return [];
-  const r = await fetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&limit=${limit}&client_id=${cid}`, { headers: { 'User-Agent': SC_UA } });
+  const r = await timedFetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&limit=${limit}&client_id=${cid}`, { headers: { 'User-Agent': SC_UA } }, 8000);
   if (!r.ok) return [];
   const j = await r.json();
   const items = [];
@@ -432,15 +488,17 @@ async function scClientSearch(query, limit = 30){
 }
 
 export async function soundcloudStreamUrl(rawId){
+  const pj = await proxyGet('/sc/stream', { id: rawId }, 10000);
+  if (pj?.url) return pj.url;
   const cid = await scGetClientId();
   if (!cid) return null;
-  const r = await fetch(`https://api-v2.soundcloud.com/tracks/${rawId}?client_id=${cid}`, { headers: { 'User-Agent': SC_UA } });
+  const r = await timedFetch(`https://api-v2.soundcloud.com/tracks/${rawId}?client_id=${cid}`, { headers: { 'User-Agent': SC_UA } }, 8000);
   if (!r.ok) return null;
   const t = await r.json();
   const trans = t.media?.transcodings || [];
   const prog = trans.find(x => x.format?.protocol === 'progressive') || trans[0];
   if (!prog?.url) return null;
-  const rr = await fetch(`${prog.url}?client_id=${cid}`, { headers: { 'User-Agent': SC_UA } });
+  const rr = await timedFetch(`${prog.url}?client_id=${cid}`, { headers: { 'User-Agent': SC_UA } }, 8000);
   if (!rr.ok) return null;
   const j = await rr.json();
   return j.url || null;
@@ -465,6 +523,8 @@ function normalizeSoundcloud(t){
 }
 
 async function soundcloudSearch(query, limit = 30){
+  const pj = await proxyGet('/sc/search', { q: query }, 10000);
+  if (pj?.items?.length) return pj.items.slice(0, limit).map(normalizeSoundcloud).filter(Boolean);
   const client = await scClientSearch(query, limit);
   if (client.length) return client;
   try {
@@ -492,17 +552,24 @@ export async function search(query, source = 'all', limit = 30){
   // SoundCloud + Audius stream directly (work even where YouTube is blocked),
   // so they lead; YouTube and iTunes follow.
   const [sc, aud, yt, it] = await Promise.all([
-    safe(soundcloudSearch(query, Math.ceil(limit / 3))),
-    safe(audiusSearch(query, Math.ceil(limit / 3))),
-    safe(youtubeSearch(query, Math.ceil(limit / 3))),
-    safe(itunesSearch(query, Math.ceil(limit / 4))),
+    safe(soundcloudSearch(query, Math.ceil(limit / 3)), 10000),
+    safe(audiusSearch(query, Math.ceil(limit / 3)), 10000),
+    safe(youtubeSearch(query, Math.ceil(limit / 3)), 12000),
+    safe(itunesSearch(query, Math.ceil(limit / 3)), 8000),
   ]);
   return interleave3(sc, aud, yt, it).slice(0, limit);
 }
 
+/* Fast home-page filler when Audius is slow or blocked. */
+export async function homeWaveTracks(limit = 14){
+  let tracks = await withTimeout(audiusTrending({ limit }), 10000, []);
+  if (tracks.length) return tracks;
+  return withTimeout(itunesSearch('top hits', limit), 8000, []);
+}
+
 /* ---------- helpers ---------- */
-async function safe(promise){
-  try { return await promise; } catch (e) { console.warn('[FLOR api]', e.message); return []; }
+async function safe(promise, ms = 12000){
+  try { return await withTimeout(promise, ms, []); } catch (e) { console.warn('[FLOR api]', e.message); return []; }
 }
 
 function interleave3(...lists){
