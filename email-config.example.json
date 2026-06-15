@@ -1,12 +1,18 @@
 {
-  "_comment": "Скопируйте этот файл в email-config.json и заполните. Нужен ОДИН из ключей (Brevo ИЛИ Resend). 'from' — адрес-отправитель, который вы подтвердили в кабинете сервиса.",
+  "_comment": "Скопируйте в email-config.json. Нужен ОДИН способ отправки.",
 
-  "_brevo_instructions": "Brevo (брее 300 писем/день): зарегистрируйтесь на brevo.com → SMTP & API → создайте API key (v3). В разделе Senders подтвердите адрес отправителя. Вставьте ключ в brevoKey и адрес в from.",
+  "_gmail": "smtp.gmail.com:465, smtpUser=ваш@gmail.com, smtpPass=пароль приложения Google",
+  "_yandex": "smtp.yandex.ru:465, smtpUser=ваш@yandex.ru, smtpPass=пароль приложения Яндекс",
+  "_mailru": "smtp.mail.ru:465, smtpUser=ваш@mail.ru, smtpPass=пароль для внешних приложений",
+  "_proton": "Платный Proton + свой домен: smtp.protonmail.ch:587, SMTP-токен в настройках Proton. Бесплатный @proton.me с VDS не работает.",
+
+  "smtpHost": "smtp.gmail.com",
+  "smtpPort": 465,
+  "smtpUser": "your@gmail.com",
+  "smtpPass": "your-app-password",
+  "from": "your@gmail.com",
+  "fromName": "FLOR MUSIC",
+
   "brevoKey": "",
-
-  "_resend_instructions": "Resend (resend.com): создайте API key. Для бесплатной отправки используйте свой подтверждённый домен или onboarding@resend.dev (на свой же email).",
-  "resendKey": "",
-
-  "from": "no-reply@example.com",
-  "fromName": "FLOR MUSIC"
+  "resendKey": ""
 }

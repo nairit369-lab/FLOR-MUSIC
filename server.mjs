@@ -9,6 +9,8 @@ import { dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import crypto from 'node:crypto';
 import os from 'node:os';
+import tls from 'node:tls';
+import net from 'node:net';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, 'app');
@@ -46,27 +48,107 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /* ============================================================
    Email delivery (for login codes & password reset).
-   Config is read from env vars or an optional email-config.json
-   file next to this server. Supported free providers: Brevo, Resend.
-   If nothing is configured, codes are printed to the console so the
-   flow still works for local testing.
+   Config is read from env vars or email-config.json next to this server.
+   Supported: любой SMTP (Gmail, Yandex, Proton*, Mail.ru…), Brevo API, Resend API.
+   If nothing is configured, codes print to the console for local testing.
    ============================================================ */
 let emailCfg = {};
 try { emailCfg = JSON.parse(readFileSync(join(__dirname, 'email-config.json'), 'utf8')) || {}; } catch { emailCfg = {}; }
 const EMAIL = {
-  brevoKey: process.env.BREVO_API_KEY || emailCfg.brevoKey || '',
-  resendKey: process.env.RESEND_API_KEY || emailCfg.resendKey || '',
-  from: process.env.EMAIL_FROM || emailCfg.from || '',
-  fromName: process.env.EMAIL_FROM_NAME || emailCfg.fromName || 'FLOR MUSIC',
+  smtpHost: (process.env.SMTP_HOST || emailCfg.smtpHost || 'smtp.gmail.com').trim(),
+  smtpPort: Number(process.env.SMTP_PORT || emailCfg.smtpPort || 465),
+  smtpUser: (process.env.SMTP_USER || emailCfg.smtpUser || '').trim(),
+  smtpPass: (process.env.SMTP_PASS || emailCfg.smtpPass || '').trim(),
+  brevoKey: (process.env.BREVO_API_KEY || emailCfg.brevoKey || '').trim(),
+  resendKey: (process.env.RESEND_API_KEY || emailCfg.resendKey || '').trim(),
+  from: (process.env.EMAIL_FROM || emailCfg.from || '').trim(),
+  fromName: (process.env.EMAIL_FROM_NAME || emailCfg.fromName || 'FLOR MUSIC').trim(),
 };
 
+function smtpConfigured(){ return !!(EMAIL.smtpUser && EMAIL.smtpPass); }
+
+function readSmtpResponse(socket){
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    const onData = chunk => {
+      buf += chunk.toString();
+      const lines = buf.split(/\r?\n/).filter(l => l.length);
+      const last = lines[lines.length - 1] || '';
+      if (/^\d{3} /.test(last)){
+        socket.off('data', onData);
+        const code = Number(last.slice(0, 3));
+        if (code >= 400) reject(new Error(buf.trim()));
+        else resolve(buf.trim());
+      }
+    };
+    socket.on('data', onData);
+    socket.once('error', reject);
+    socket.once('close', () => reject(new Error('SMTP connection closed')));
+  });
+}
+
+async function smtpCmd(socket, cmd){
+  if (cmd != null) socket.write(cmd + '\r\n');
+  return readSmtpResponse(socket);
+}
+
+async function smtpConnect(host, port){
+  if (port === 465){
+    const socket = tls.connect({ host, port, servername: host, rejectUnauthorized: true });
+    await new Promise((res, rej) => { socket.once('secureConnect', res); socket.once('error', rej); });
+    return socket;
+  }
+  const plain = net.connect({ host, port });
+  await new Promise((res, rej) => { plain.once('connect', res); plain.once('error', rej); });
+  await readSmtpResponse(plain);
+  await smtpCmd(plain, 'EHLO flor-music');
+  await smtpCmd(plain, 'STARTTLS');
+  const socket = tls.connect({ socket: plain, servername: host, rejectUnauthorized: true });
+  await new Promise((res, rej) => { socket.once('secureConnect', res); socket.once('error', rej); });
+  return socket;
+}
+
+async function sendSmtpEmail(to, subject, html){
+  const from = EMAIL.from || EMAIL.smtpUser;
+  const host = EMAIL.smtpHost;
+  const port = EMAIL.smtpPort || 465;
+  const socket = await smtpConnect(host, port);
+
+  if (port === 465) await readSmtpResponse(socket);
+  await smtpCmd(socket, 'EHLO flor-music');
+  await smtpCmd(socket, 'AUTH LOGIN');
+  await smtpCmd(socket, Buffer.from(EMAIL.smtpUser).toString('base64'));
+  await smtpCmd(socket, Buffer.from(EMAIL.smtpPass).toString('base64'));
+  await smtpCmd(socket, `MAIL FROM:<${from}>`);
+  await smtpCmd(socket, `RCPT TO:<${to}>`);
+  await smtpCmd(socket, 'DATA');
+  const body = Buffer.from(html, 'utf8').toString('base64');
+  const msg = [
+    `From: ${EMAIL.fromName} <${from}>`,
+    `To: ${to}`,
+    `Subject: =?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    body,
+    '.',
+  ].join('\r\n');
+  await smtpCmd(socket, msg);
+  try { await smtpCmd(socket, 'QUIT'); } catch {}
+  socket.end();
+}
+
 async function sendEmail(to, subject, html, textCode){
-  // No provider configured → log to console so local testing works.
-  if (!EMAIL.brevoKey && !EMAIL.resendKey){
+  if (!smtpConfigured() && !EMAIL.brevoKey && !EMAIL.resendKey){
     console.log(`\n  [EMAIL → ${to}] ${subject}\n  Код: ${textCode || '(см. письмо)'}\n`);
     return { ok: true, dev: true };
   }
   try {
+    if (smtpConfigured()){
+      await sendSmtpEmail(to, subject, html);
+      return { ok: true };
+    }
     if (EMAIL.brevoKey){
       const r = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
@@ -87,11 +169,15 @@ async function sendEmail(to, subject, html, textCode){
       body: JSON.stringify({ from: `${EMAIL.fromName} <${EMAIL.from}>`, to: [to], subject, html }),
       signal: AbortSignal.timeout(10000),
     });
-    if (!r.ok){ const t = await r.text().catch(() => ''); console.error('Resend send failed', r.status, t); return { ok: false }; }
+    if (!r.ok){ const t = await r.text().catch(() => ''); console.error('Resend send failed', r.status, t); return { ok: false, error: t }; }
     return { ok: true };
-  } catch (e){ console.error('sendEmail error', e.message); return { ok: false }; }
+  } catch (e){ console.error('sendEmail error', e.message); return { ok: false, error: e.message }; }
 }
-const emailConfigured = () => !!(EMAIL.brevoKey || EMAIL.resendKey);
+const emailConfigured = () => smtpConfigured() || !!(EMAIL.brevoKey || EMAIL.resendKey);
+
+function emailSendError(){
+  return 'Не удалось отправить письмо. Проверьте email-config.json на сервере (Gmail SMTP или API-ключ).';
+}
 
 /* one-time codes: key `${purpose}:${email}` -> { code, exp, tries } */
 const codes = new Map();
@@ -174,6 +260,7 @@ const server = http.createServer(async (req, res) => {
       pendingReg.set(email, { name: name || email.split('@')[0], pass: hashPass(pass), exp: Date.now() + CODE_TTL });
       const code = putCode('register', email);
       const r = await sendEmail(email, 'Код подтверждения FLOR MUSIC', codeEmailHtml(code, 'подтверждения регистрации'), code);
+      if (!r.ok) return json(502, { error: emailSendError() });
       return json(200, { ok: true, step: 'verify', emailed: !r.dev, devCode: r.dev ? code : undefined });
     }
 
@@ -230,6 +317,7 @@ const server = http.createServer(async (req, res) => {
       const code = putCode(purpose, email);
       const action = purpose === 'reset' ? 'сброса пароля' : 'входа';
       const r = await sendEmail(email, 'Код FLOR MUSIC', codeEmailHtml(code, action), code);
+      if (!r.ok) return json(502, { error: emailSendError() });
       return json(200, { ok: true, emailed: !r.dev, devCode: r.dev ? code : undefined });
     }
 
@@ -669,6 +757,10 @@ function listen(port, attemptsLeft = 10){
   // 0.0.0.0 — доступ с телефона/других устройств в той же сети.
   server.listen(port, '0.0.0.0', () => {
     console.log(`\n  FLOR MUSIC → http://localhost:${port}`);
+    if (smtpConfigured()) console.log(`  [EMAIL] SMTP ${EMAIL.smtpHost}:${EMAIL.smtpPort}, from: ${EMAIL.from || EMAIL.smtpUser}`);
+    else if (EMAIL.brevoKey) console.log(`  [EMAIL] Brevo, from: ${EMAIL.from || '(не указан!)'}`);
+    else if (EMAIL.resendKey) console.log(`  [EMAIL] Resend, from: ${EMAIL.from || '(не указан!)'}`);
+    else console.log('  [EMAIL] не настроена — коды выводятся в консоль сервера');
     const lan = lanUrls(port);
     if (lan.length){
       console.log('  С телефона откройте один из адресов:');
