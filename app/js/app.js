@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=8';
-import { player } from './player.js?v=8';
+import { I } from './icons.js?v=11';
+import { player } from './player.js?v=11';
 import {
   SOURCES, search as apiSearch, primeAudius,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=8';
+} from './api.js?v=11';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));

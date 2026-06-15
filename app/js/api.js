@@ -103,47 +103,74 @@ export function audiusStreamUrlSync(rawId){
 // Warm up the discovery-node host early so the first play can stay synchronous.
 export function primeAudius(){ return audiusHost(); }
 
+async function audiusDirect(path, params){
+  const host = await audiusHost();
+  const qs = new URLSearchParams(params);
+  if (!qs.has('app_name')) qs.set('app_name', APP);
+  const r = await fetch(`${host}${path}?${qs}`);
+  if (!r.ok) throw new Error('Audius ' + r.status);
+  return r.json();
+}
+
+async function audiusFromServer(path, params){
+  const qs = new URLSearchParams(params).toString();
+  const r = await fetch(`/api/audius/${path}?${qs}`);
+  if (!r.ok) throw new Error('Audius proxy ' + r.status);
+  return r.json();
+}
+
 async function audiusSearch(query, limit = 30){
-  const url = `/api/audius/search?query=${encodeURIComponent(query)}&limit=${limit}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('Audius search ' + r.status);
-  const j = await r.json();
+  try {
+    const j = await audiusFromServer('search', { query, limit });
+    const items = (j.data || []).map(normalizeAudius).filter(Boolean);
+    if (items.length) return items;
+  } catch {}
+  const j = await audiusDirect('/v1/tracks/search', { query, limit });
   return (j.data || []).map(normalizeAudius).filter(Boolean);
 }
 
 export async function audiusTrending({ genre, time = 'week', limit = 16 } = {}){
-  let url = `/api/audius/trending?time=${encodeURIComponent(time)}`;
-  if (genre) url += `&genre=${encodeURIComponent(genre)}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('Audius trending ' + r.status);
-  const j = await r.json();
+  const params = { time };
+  if (genre) params.genre = genre;
+  try {
+    const j = await audiusFromServer('trending', params);
+    const items = (j.data || []).slice(0, limit).map(normalizeAudius).filter(Boolean);
+    if (items.length) return items;
+  } catch {}
+  const j = await audiusDirect('/v1/tracks/trending', params);
   return (j.data || []).slice(0, limit).map(normalizeAudius).filter(Boolean);
 }
 
 export async function audiusTrendingPlaylists(limit = 10){
+  const mapPl = list => (list || []).slice(0, limit).map(p => ({
+    id: 'pl:' + p.id,
+    rawId: p.id,
+    source: 'audius',
+    title: p.playlist_name || 'Плейлист',
+    subtitle: p.user?.name ? 'от ' + p.user.name : 'Audius',
+    kind: 'Плейлист',
+    artwork: audiusArtworkSet(p.artwork)[0] || null,
+    artworkFallbacks: audiusArtworkSet(p.artwork).slice(1),
+    desc: p.description || '',
+  })).filter(p => p.title);
   try {
-    const r = await fetch('/api/audius/playlists/trending');
-    if (!r.ok) throw new Error('' + r.status);
-    const j = await r.json();
-    return (j.data || []).slice(0, limit).map(p => ({
-      id: 'pl:' + p.id,
-      rawId: p.id,
-      source: 'audius',
-      title: p.playlist_name || 'Плейлист',
-      subtitle: p.user?.name ? 'от ' + p.user.name : 'Audius',
-      kind: 'Плейлист',
-      artwork: audiusArtworkSet(p.artwork)[0] || null,
-      artworkFallbacks: audiusArtworkSet(p.artwork).slice(1),
-      desc: p.description || '',
-    })).filter(p => p.title);
+    const j = await audiusFromServer('playlists/trending', {});
+    const items = mapPl(j.data);
+    if (items.length) return items;
+  } catch {}
+  try {
+    const j = await audiusDirect('/v1/playlists/trending', {});
+    return mapPl(j.data);
   } catch { return []; }
 }
 
 export async function audiusPlaylistTracks(rawId, limit = 60){
-  const url = `/api/audius/playlists/tracks?id=${encodeURIComponent(rawId)}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('Audius playlist ' + r.status);
-  const j = await r.json();
+  try {
+    const j = await audiusFromServer('playlists/tracks', { id: rawId });
+    const items = (j.data || []).slice(0, limit).map(normalizeAudius).filter(Boolean);
+    if (items.length) return items;
+  } catch {}
+  const j = await audiusDirect(`/v1/playlists/${rawId}/tracks`, {});
   return (j.data || []).slice(0, limit).map(normalizeAudius).filter(Boolean);
 }
 
@@ -267,17 +294,158 @@ function normalizeYoutube(v){
   };
 }
 
+const INVIDIOUS_CLIENT = [
+  'https://invidious.ducks.party',
+  'https://invidious.privacyredirect.com',
+  'https://invidious.io',
+  'https://vid.puffyan.us',
+  'https://inv.tux.pizza',
+  'https://inv.nadeko.net',
+  'https://invidious.fdn.fr',
+  'https://yewtu.be',
+];
+
+const PIPED_CLIENT = [
+  'https://api.piped.private.coffee',
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.leptons.xyz',
+  'https://pipedapi.drgns.space',
+];
+
+async function invidiousClientSearch(query, limit = 30){
+  for (const inst of INVIDIOUS_CLIENT){
+    try {
+      const r = await fetch(`${inst}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, { signal: AbortSignal.timeout(10000) });
+      if (!r.ok) continue;
+      const j = await r.json();
+      const items = [];
+      for (const v of (j || [])){
+        if (v.type !== 'video' || !v.videoId || !v.lengthSeconds) continue;
+        const thumb = (v.videoThumbnails || []).find(t => t.quality === 'medium')?.url
+          || (v.videoThumbnails || []).at(-1)?.url
+          || `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`;
+        items.push(normalizeYoutube({
+          id: v.videoId,
+          title: v.title,
+          author: v.author,
+          duration: v.lengthSeconds,
+          thumb,
+        }));
+        if (items.length >= limit) break;
+      }
+      if (items.length) return items;
+    } catch {}
+  }
+  return [];
+}
+
+export async function youtubePipedAudioUrl(rawId){
+  for (const inst of PIPED_CLIENT){
+    try {
+      const r = await fetch(`${inst}/streams/${rawId}`, { signal: AbortSignal.timeout(12000) });
+      if (!r.ok) continue;
+      const j = await r.json();
+      const audios = (j.audioStreams || []).filter(a => a && a.url);
+      if (!audios.length) continue;
+      audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+      const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
+      const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
+                || audios.find(isM4a) || audios[0];
+      if (pick?.url) return pick.url;
+    } catch {}
+  }
+  return null;
+}
+
 async function youtubeSearch(query, limit = 30){
-  const r = await fetch(`/api/yt/search?q=${encodeURIComponent(query)}`);
-  if (!r.ok) throw new Error('YouTube search ' + r.status);
-  const j = await r.json();
-  return (j.items || []).slice(0, limit).map(normalizeYoutube).filter(Boolean);
+  const client = await invidiousClientSearch(query, limit);
+  if (client.length) return client;
+  try {
+    const r = await fetch(`/api/yt/search?q=${encodeURIComponent(query)}`);
+    if (!r.ok) throw new Error('YouTube search ' + r.status);
+    const j = await r.json();
+    return (j.items || []).slice(0, limit).map(normalizeYoutube).filter(Boolean);
+  } catch { return []; }
 }
 
 /* ============================================================
-   SoundCloud — full tracks, works in regions where YouTube is
-   blocked. Search + stream resolution happen server-side.
+   SoundCloud — search + stream from the browser when the VPS
+   cannot reach soundcloud.com (common on RU datacenters).
    ============================================================ */
+const SC_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
+let _scClientId = null, _scClientIdAt = 0;
+const SC_CID_TTL = 6 * 60 * 60 * 1000;
+
+async function scGetClientId(){
+  if (_scClientId && Date.now() - _scClientIdAt < SC_CID_TTL) return _scClientId;
+  const html = await (await fetch('https://soundcloud.com/', { headers: { 'User-Agent': SC_UA } })).text();
+  const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(m => m[1]);
+  const patterns = [
+    /client_id\s*[:=]\s*"([a-zA-Z0-9]{20,40})"/,
+    /client_id\s*[:=]\s*'([a-zA-Z0-9]{20,40})'/,
+    /"client_id"\s*:\s*"([a-zA-Z0-9]{20,40})"/,
+  ];
+  for (const src of scripts.reverse()){
+    try {
+      const url = src.startsWith('http') ? src : 'https://soundcloud.com' + src;
+      const js = await (await fetch(url, { headers: { 'User-Agent': SC_UA }, signal: AbortSignal.timeout(8000) })).text();
+      for (const p of patterns){
+        const m = js.match(p);
+        if (m){ _scClientId = m[1]; _scClientIdAt = Date.now(); return _scClientId; }
+      }
+    } catch {}
+  }
+  return _scClientId;
+}
+
+function scArtwork(url){
+  return url ? url.replace('-large.', '-t300x300.') : '';
+}
+
+function scMapTrack(t){
+  if (!t || t.kind !== 'track' || t.streamable === false) return null;
+  const hasProgressive = (t.media?.transcodings || []).some(x => x.format?.protocol === 'progressive');
+  if (!hasProgressive) return null;
+  return normalizeSoundcloud({
+    id: t.id,
+    title: t.title,
+    author: t.user?.username || '',
+    duration: Math.round((t.duration || 0) / 1000),
+    thumb: scArtwork(t.artwork_url || t.user?.avatar_url),
+  });
+}
+
+async function scClientSearch(query, limit = 30){
+  const cid = await scGetClientId();
+  if (!cid) return [];
+  const r = await fetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&limit=${limit}&client_id=${cid}`, { headers: { 'User-Agent': SC_UA } });
+  if (!r.ok) return [];
+  const j = await r.json();
+  const items = [];
+  for (const t of (j.collection || [])){
+    const n = scMapTrack(t);
+    if (n) items.push(n);
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
+export async function soundcloudStreamUrl(rawId){
+  const cid = await scGetClientId();
+  if (!cid) return null;
+  const r = await fetch(`https://api-v2.soundcloud.com/tracks/${rawId}?client_id=${cid}`, { headers: { 'User-Agent': SC_UA } });
+  if (!r.ok) return null;
+  const t = await r.json();
+  const trans = t.media?.transcodings || [];
+  const prog = trans.find(x => x.format?.protocol === 'progressive') || trans[0];
+  if (!prog?.url) return null;
+  const rr = await fetch(`${prog.url}?client_id=${cid}`, { headers: { 'User-Agent': SC_UA } });
+  if (!rr.ok) return null;
+  const j = await rr.json();
+  return j.url || null;
+}
+
 function normalizeSoundcloud(t){
   if (!t || t.id == null) return null;
   return {
@@ -291,17 +459,20 @@ function normalizeSoundcloud(t){
     duration: t.duration || 0,
     artwork: t.thumb || '',
     artworkFallbacks: [],
-    // Server resolves the progressive stream and 302-redirects the browser to it.
-    streamUrl: '/api/sc/stream?id=' + encodeURIComponent(t.id),
+    streamUrl: null,
     isFull: true,
   };
 }
 
 async function soundcloudSearch(query, limit = 30){
-  const r = await fetch(`/api/sc/search?q=${encodeURIComponent(query)}`);
-  if (!r.ok) throw new Error('SoundCloud search ' + r.status);
-  const j = await r.json();
-  return (j.items || []).slice(0, limit).map(normalizeSoundcloud).filter(Boolean);
+  const client = await scClientSearch(query, limit);
+  if (client.length) return client;
+  try {
+    const r = await fetch(`/api/sc/search?q=${encodeURIComponent(query)}`);
+    if (!r.ok) throw new Error('SoundCloud search ' + r.status);
+    const j = await r.json();
+    return (j.items || []).slice(0, limit).map(normalizeSoundcloud).filter(Boolean);
+  } catch { return []; }
 }
 
 /* ============================================================

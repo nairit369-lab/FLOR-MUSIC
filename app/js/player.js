@@ -3,7 +3,7 @@
    - HTML5 <audio> for Audius / iTunes / Radio
    - Official YouTube IFrame Player for YouTube (full songs, no key)
    ============================================================ */
-import { audiusStreamUrl, audiusStreamUrlSync } from './api.js?v=8';
+import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=11';
 
 class Player {
   constructor(){
@@ -182,6 +182,11 @@ class Player {
         if (token !== this._loadToken) return;
         track.streamUrl = src;
       }
+      if (!src && track.source === 'soundcloud'){
+        src = await soundcloudStreamUrl(track.rawId);
+        if (token !== this._loadToken) return;
+        track.streamUrl = src;
+      }
       if (token !== this._loadToken) return;
       if (!src) throw new Error('no source');
       this.audio.src = src;
@@ -195,14 +200,15 @@ class Player {
   }
 
   _onEnded(){ this.next(true); }
-  _onError(){
+  async _onError(){
     this.loading = false;
     const t = this.current;
-    // YouTube IFrame failed (often blocked/unavailable on RU ISPs) — try once more
-    // through the server's proxied audio stream before giving up on the track.
+    // YouTube IFrame failed (blocked on some ISPs) — try Piped from the browser,
+    // then the server proxy as a last resort.
     if (t && t.source === 'youtube' && this.mode === 'yt' && !t._proxyTried){
       t._proxyTried = true;
-      t.streamUrl = '/api/yt/audio?id=' + t.rawId;
+      const piped = await youtubePipedAudioUrl(t.rawId);
+      t.streamUrl = piped || ('/api/yt/audio?id=' + t.rawId);
       this._load(true);
       return;
     }
