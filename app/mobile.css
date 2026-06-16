@@ -116,10 +116,11 @@
   .m-trow .dur{ font-size:13px; color:var(--text-3); min-width:34px; text-align:right; flex:none; }
 
   /* track action menu → bottom sheet */
-  .ctx-menu{
+  .ctx-menu, .ctx-menu.ctx-sheet{
     position:fixed !important; left:10px !important; right:10px !important;
     top:auto !important; bottom:calc(env(safe-area-inset-bottom, 0px) + 14px) !important;
     min-width:0; width:auto; max-height:64vh; border-radius:20px; padding:8px;
+    z-index:520 !important;
   }
   .ctx-menu button{ padding:13px 14px; font-size:15px; }
   .ctx-menu button svg{ width:20px; height:20px; }

@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=17';
-import { player } from './player.js?v=17';
+import { I } from './icons.js?v=18';
+import { player } from './player.js?v=18';
 import {
   SOURCES, search as apiSearch, primeAudius, loadProxyConfig, homeWaveTracks,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=17';
+} from './api.js?v=18';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1200,20 +1200,37 @@ function quickAddToPlaylist(track, anchor){
   openPlaylistPicker(track, anchor);
 }
 
+function positionCtxMenu(menu, anchor){
+  const sheet = isMobile() || document.body.classList.contains('fs-open');
+  menu.classList.toggle('ctx-sheet', sheet);
+  if (sheet){
+    menu.style.left = '';
+    menu.style.top = '';
+    menu.style.right = '';
+    menu.style.bottom = '';
+    return;
+  }
+  const rect = anchor.getBoundingClientRect();
+  const mw = menu.offsetWidth || 240, mh = menu.offsetHeight || 200;
+  let left = rect.right - mw; let top = rect.bottom + 6;
+  if (top + mh > window.innerHeight) top = rect.top - mh - 6;
+  if (left < 8) left = 8;
+  menu.style.left = left + 'px';
+  menu.style.top = Math.max(8, top) + 'px';
+  menu.style.right = '';
+  menu.style.bottom = '';
+}
+
 function openPlaylistPicker(track, anchor){
   const menu = $('#ctxMenu');
   let html = `<div class="ctx-label">Добавить в плейлист</div>`;
   playlists.forEach(p => { html += `<button data-pl="${esc(p.id)}">${I.music}<span>${esc(p.name)}</span></button>`; });
   html += `<button data-act="newpl">${I.plus}<span>Новый плейлист…</span></button>`;
   menu.innerHTML = html;
-  const rect = anchor.getBoundingClientRect();
   menu.hidden = false;
-  const mw = menu.offsetWidth || 240, mh = menu.offsetHeight || 200;
-  let left = rect.right - mw; let top = rect.bottom + 6;
-  if (top + mh > window.innerHeight) top = rect.top - mh - 6;
-  if (left < 8) left = 8;
-  menu.style.left = left + 'px'; menu.style.top = Math.max(8, top) + 'px';
-  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  positionCtxMenu(menu, anchor);
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
     const pl = b.dataset.pl;
     if (pl) addToPlaylist(pl, track);
     else if (b.dataset.act === 'newpl') openCreatePlaylistModal(track);
@@ -1261,15 +1278,11 @@ function openTrackMenu(track, anchor, ctx){
   if (inPl) html += `<div class="ctx-sep"></div><button data-act="remove" class="danger">${I.minus}<span>Убрать из плейлиста</span></button>`;
   menu.innerHTML = html;
 
-  const rect = anchor.getBoundingClientRect();
   menu.hidden = false;
-  const mw = menu.offsetWidth || 240, mh = menu.offsetHeight || 200;
-  let left = rect.right - mw; let top = rect.bottom + 6;
-  if (top + mh > window.innerHeight) top = rect.top - mh - 6;
-  if (left < 8) left = 8;
-  menu.style.left = left + 'px'; menu.style.top = Math.max(8, top) + 'px';
+  positionCtxMenu(menu, anchor);
 
-  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
     const act = b.dataset.act, pl = b.dataset.pl;
     if (pl) addToPlaylist(pl, track);
     else if (act === 'like') toggleLike(track);
@@ -1946,7 +1959,10 @@ async function init(){
   $('#shuffleBtn').addEventListener('click', () => player.toggleShuffle());
   $('#repeatBtn').addEventListener('click', () => player.cycleRepeat());
   $('#npLike').addEventListener('click', () => { if (player.current) toggleLike(player.current); });
-  $('#npAdd').addEventListener('click', () => { if (player.current) quickAddToPlaylist(player.current, $('#npAdd')); });
+  $('#npAdd').addEventListener('click', e => {
+    e.stopPropagation();
+    if (player.current) quickAddToPlaylist(player.current, $('#npAdd'));
+  });
   $('#expandBtn').addEventListener('click', openFS);
   $('#npCover').addEventListener('click', openFS);
   document.querySelector('.np-left .npmeta')?.addEventListener('click', () => { if (window.matchMedia('(max-width: 760px)').matches && player.current) openFS(); });
@@ -1965,7 +1981,10 @@ async function init(){
   $('#fsShuffle').addEventListener('click', () => player.toggleShuffle());
   $('#fsRepeat').addEventListener('click', () => player.cycleRepeat());
   $('#fsLike').addEventListener('click', () => { if (player.current) toggleLike(player.current); });
-  $('#fsAdd').addEventListener('click', () => { if (player.current) quickAddToPlaylist(player.current, $('#fsAdd')); });
+  $('#fsAdd').addEventListener('click', e => {
+    e.stopPropagation();
+    if (player.current) quickAddToPlaylist(player.current, $('#fsAdd'));
+  });
   $$('.fs-rtabs button').forEach(b => b.addEventListener('click', () => {
     $$('.fs-rtabs button').forEach(x => x.classList.remove('on'));
     b.classList.add('on');
@@ -1982,7 +2001,9 @@ async function init(){
 
   // global click: close ctx menu / notif panel / modal backdrop
   document.addEventListener('click', e => {
-    if (!e.target.closest('#ctxMenu')) closeCtxMenu();
+    if (!e.target.closest('#ctxMenu') && !e.target.closest('.addpl') && !e.target.closest('.maddpl')
+        && !e.target.closest('#npAdd') && !e.target.closest('#fsAdd')
+        && !e.target.closest('.more') && !e.target.closest('.mmore')) closeCtxMenu();
     if (!e.target.closest('#notifPanel') && !e.target.closest('#notifBtn') && !e.target.closest('#mBell')) $('#notifPanel').hidden = true;
   });
   $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });

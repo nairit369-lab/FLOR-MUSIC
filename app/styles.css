@@ -773,6 +773,7 @@ input{ font-family: inherit; }
 .ctx-menu button:hover svg{ color:var(--accent-2); }
 .ctx-menu button.danger{ color:#ff6b8a; }
 .ctx-menu button.danger svg{ color:#ff6b8a; }
+body.fs-open .ctx-menu, .ctx-menu.ctx-sheet{ z-index:520 !important; }
 .ctx-sep{ height:1px; background:var(--line); margin:6px 8px; }
 .ctx-label{ font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); padding:8px 11px 4px; font-weight:700; }
 

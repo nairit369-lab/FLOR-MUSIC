@@ -3,7 +3,7 @@
    - HTML5 <audio> for Audius / iTunes / Radio
    - Official YouTube IFrame Player for YouTube (full songs, no key)
    ============================================================ */
-import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=17';
+import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=18';
 
 class Player {
   constructor(){
@@ -27,18 +27,50 @@ class Player {
 
     this._volume = this._readVolume();
     this.audio.volume = this._volume;
+    this.audio.playsInline = true;
+    this.audio.setAttribute('playsinline', '');
+    this.audio.setAttribute('webkit-playsinline', 'true');
+    this._lastLoadedId = null;
 
     this.audio.addEventListener('timeupdate', () => { if (this.mode === 'audio') this._emit('progress'); });
     this.audio.addEventListener('durationchange', () => { if (this.mode === 'audio') this._emit('progress'); });
-    this.audio.addEventListener('play',  () => { if (this.mode === 'audio') this._emit('state'); });
-    this.audio.addEventListener('pause', () => { if (this.mode === 'audio') this._emit('state'); });
+    this.audio.addEventListener('play',  () => { if (this.mode === 'audio'){ this._syncMediaSessionState(); this._emit('state'); } });
+    this.audio.addEventListener('pause', () => { if (this.mode === 'audio'){ this._syncMediaSessionState(); this._emit('state'); } });
     this.audio.addEventListener('waiting', () => { if (this.mode === 'audio'){ this.loading = true; this._emit('state'); } });
     this.audio.addEventListener('playing', () => { if (this.mode === 'audio'){ this.loading = false; this._emit('state'); } });
     this.audio.addEventListener('canplay', () => { if (this.mode === 'audio'){ this.loading = false; this._emit('state'); } });
     this.audio.addEventListener('ended', () => { if (this.mode === 'audio') this._onEnded(); });
     this.audio.addEventListener('error', () => { if (this.mode === 'audio') this._onError(); });
 
+    this._bindBackgroundHelpers();
     this._loadYouTubeAPI();
+  }
+
+  _bindBackgroundHelpers(){
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden || !this.current) return;
+      this._syncMediaSessionState();
+      if (this.mode === 'audio' && this.playing && this.audio.paused){
+        this.audio.play().catch(() => {});
+      }
+    });
+    window.addEventListener('pageshow', () => {
+      if (!this.current) return;
+      this._syncMediaSessionState();
+      if (this.mode === 'audio' && this.playing && this.audio.paused){
+        this.audio.play().catch(() => {});
+      }
+    });
+  }
+
+  _resetTrackRetries(track){
+    if (!track || this._lastLoadedId === track.id) return;
+    this._lastLoadedId = track.id;
+    delete track._streamRetry;
+    delete track._proxyTried;
+    delete track._pipedTried;
+    delete track._serverYtTried;
+    delete track._useYtIframe;
   }
 
   /* ---------- subscription ---------- */
@@ -151,8 +183,23 @@ class Player {
     if (!track) return;
     const token = ++this._loadToken;
     this.loading = true;
+    this._resetTrackRetries(track);
 
-    if (track.source === 'youtube' && !track.streamUrl){
+    // YouTube: HTML5 audio works in background; iframe stops when screen locks.
+    if (track.source === 'youtube' && !track.streamUrl && !track._useYtIframe){
+      if (!track._pipedTried){
+        track._pipedTried = true;
+        const piped = await Promise.race([
+          youtubePipedAudioUrl(track.rawId),
+          new Promise(r => setTimeout(() => r(null), 10000)),
+        ]);
+        if (token !== this._loadToken) return;
+        if (piped) track.streamUrl = piped;
+        else track._useYtIframe = true;
+      }
+    }
+
+    if (track.source === 'youtube' && !track.streamUrl && track._useYtIframe){
       // Fallback only: no proxied audio URL → use the YouTube IFrame backend.
       this.mode = 'yt';
       try { this.audio.pause(); } catch {}
@@ -186,6 +233,10 @@ class Player {
           src = await soundcloudStreamUrl(track.rawId);
           track.streamUrl = src;
         }
+        if (!src && track.source === 'youtube'){
+          src = '/api/yt/audio?id=' + encodeURIComponent(track.rawId);
+          track.streamUrl = src;
+        }
         return src;
       };
       const src = await Promise.race([
@@ -215,6 +266,13 @@ class Player {
         this._load(true);
         return;
       }
+      if (t && t.source === 'youtube' && !t._serverYtTried){
+        t._serverYtTried = true;
+        t.streamUrl = '/api/yt/audio?id=' + encodeURIComponent(t.rawId);
+        t._useYtIframe = false;
+        this._load(true);
+        return;
+      }
       this._emit('mediaerror');
       if (this.queue.length > 1) setTimeout(() => this.next(true), 400);
     }
@@ -236,12 +294,19 @@ class Player {
       const fresh = await soundcloudStreamUrl(t.rawId);
       if (fresh){ t.streamUrl = fresh; this._load(true); return; }
     }
-    // YouTube IFrame failed (blocked on some ISPs) — try Piped from the browser,
-    // then the server proxy as a last resort.
+    if (t && t.source === 'youtube' && !t._serverYtTried){
+      t._serverYtTried = true;
+      t.streamUrl = '/api/yt/audio?id=' + encodeURIComponent(t.rawId);
+      t._useYtIframe = false;
+      this._load(true);
+      return;
+    }
+    // YouTube IFrame failed — try Piped, then server proxy.
     if (t && t.source === 'youtube' && this.mode === 'yt' && !t._proxyTried){
       t._proxyTried = true;
       const piped = await youtubePipedAudioUrl(t.rawId);
-      t.streamUrl = piped || ('/api/yt/audio?id=' + t.rawId);
+      t.streamUrl = piped || ('/api/yt/audio?id=' + encodeURIComponent(t.rawId));
+      t._useYtIframe = false;
       this._load(true);
       return;
     }
@@ -276,9 +341,9 @@ class Player {
         },
         onStateChange: (e) => {
           this._ytState = e.data;
-          if (e.data === 3){ this.loading = true; }                 // buffering
-          if (e.data === 1){ this.loading = false; this._updateMediaSession(this.current); } // playing
-          if (e.data === 0){ this._onEnded(); }                     // ended
+          if (e.data === 3){ this.loading = true; }
+          if (e.data === 1){ this.loading = false; this._updateMediaSession(this.current); this._syncMediaSessionState(); }
+          if (e.data === 0){ this._onEnded(); }
           this._emit('state');
         },
         onError: () => { this._onError(); },
@@ -289,6 +354,13 @@ class Player {
   _stopYTPoll(){ if (this._ytPoll){ clearInterval(this._ytPoll); this._ytPoll = null; } if (this._ytLoadTimer){ clearTimeout(this._ytLoadTimer); this._ytLoadTimer = null; } }
 
   /* ---------- media session ---------- */
+  _syncMediaSessionState(){
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = this.playing ? 'playing' : 'paused';
+    } catch {}
+  }
+
   _updateMediaSession(track){
     if (!track || !('mediaSession' in navigator)) return;
     try {
@@ -300,6 +372,7 @@ class Player {
       navigator.mediaSession.setActionHandler('pause', () => this.toggle());
       navigator.mediaSession.setActionHandler('nexttrack', () => this.next());
       navigator.mediaSession.setActionHandler('previoustrack', () => this.prev());
+      this._syncMediaSessionState();
       // Many covers aren't square (YouTube 16:9 etc.), which the iOS player shows
       // letterboxed with black bars. Re-draw to a centred square so the system
       // player always gets clean square artwork.
