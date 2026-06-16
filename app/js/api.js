@@ -142,15 +142,10 @@ function normalizeAudius(t){
 }
 
 export async function audiusStreamUrl(rawId){
-  const host = await audiusHost();
-  // The /stream endpoint 302-redirects to the actual audio; browsers follow it.
-  return `${host}/v1/tracks/${rawId}/stream?app_name=${APP}`;
+  return playUrl({ source: 'audius', rawId });
 }
-// Synchronous variant — usable inside a user gesture once the host is known.
-// (Mobile browsers block playback that starts after an `await`, so the player
-//  prefers this and only falls back to the async resolver on a cold start.)
 export function audiusStreamUrlSync(rawId){
-  return _audiusHost ? `${_audiusHost}/v1/tracks/${rawId}/stream?app_name=${APP}` : null;
+  return playUrl({ source: 'audius', rawId });
 }
 // Warm up the discovery-node host early so the first play can stay synchronous.
 export function primeAudius(){ return audiusHost(); }
@@ -488,20 +483,20 @@ async function scClientSearch(query, limit = 30){
 }
 
 export async function soundcloudStreamUrl(rawId){
-  const pj = await proxyGet('/sc/stream', { id: rawId }, 10000);
-  if (pj?.url) return pj.url;
-  const cid = await scGetClientId();
-  if (!cid) return null;
-  const r = await timedFetch(`https://api-v2.soundcloud.com/tracks/${rawId}?client_id=${cid}`, { headers: { 'User-Agent': SC_UA } }, 8000);
-  if (!r.ok) return null;
-  const t = await r.json();
-  const trans = t.media?.transcodings || [];
-  const prog = trans.find(x => x.format?.protocol === 'progressive') || trans[0];
-  if (!prog?.url) return null;
-  const rr = await timedFetch(`${prog.url}?client_id=${cid}`, { headers: { 'User-Agent': SC_UA } }, 8000);
-  if (!rr.ok) return null;
-  const j = await rr.json();
-  return j.url || null;
+  return playUrl({ source: 'soundcloud', rawId: String(rawId) });
+}
+
+/** Same-origin playback URL — required for background audio on iOS/PWA. */
+export function playUrl(track){
+  if (!track?.rawId && !track?.streamUrl) return null;
+  const id = encodeURIComponent(track.rawId || '');
+  if (track.source === 'audius') return `/api/audius/stream?id=${id}`;
+  if (track.source === 'youtube') return `/api/yt/audio?id=${id}`;
+  if (track.source === 'soundcloud') return `/api/sc/audio?id=${id}`;
+  if (track.streamUrl && (track.source === 'itunes' || track.source === 'radio' || track.isRadio)){
+    return `/api/external/audio?u=${encodeURIComponent(track.streamUrl)}`;
+  }
+  return track.streamUrl || null;
 }
 
 function normalizeSoundcloud(t){

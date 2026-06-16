@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=18';
-import { player } from './player.js?v=18';
+import { I } from './icons.js?v=19';
+import { player } from './player.js?v=19';
 import {
   SOURCES, search as apiSearch, primeAudius, loadProxyConfig, homeWaveTracks,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=18';
+} from './api.js?v=19';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1752,9 +1752,7 @@ function openFS(){ if (!player.current) return; $('#fsplayer').classList.add('op
 function closeFS(){ $('#fsplayer').classList.remove('open'); document.body.classList.remove('fs-open'); }
 
 // The YouTube engine stays hidden off-screen; the player always shows artwork.
-function updateYtMode(){
-  document.body.classList.toggle('yt-mode', player.mode === 'yt' && !!player.current);
-}
+function updateYtMode(){ document.body.classList.remove('yt-mode'); }
 
 const _artColorCache = new Map();
 const ART_PALETTE = [

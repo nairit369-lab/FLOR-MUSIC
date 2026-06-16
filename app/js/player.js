@@ -1,63 +1,77 @@
 /* ============================================================
-   FLOR MUSIC — Audio playback engine (dual backend)
-   - HTML5 <audio> for Audius / iTunes / Radio
-   - Official YouTube IFrame Player for YouTube (full songs, no key)
+   FLOR MUSIC — Audio playback engine
+   All streams go through same-origin server proxy → background play on iOS/PWA.
    ============================================================ */
-import { audiusStreamUrl, audiusStreamUrlSync, youtubePipedAudioUrl, soundcloudStreamUrl } from './api.js?v=18';
+import { playUrl } from './api.js?v=19';
 
 class Player {
   constructor(){
-    this.audio = new Audio();
-    this.audio.preload = 'auto';
+    this._audio = null;
     this.queue = [];
     this.index = -1;
     this.shuffle = false;
-    this.repeat = 'off';          // 'off' | 'all' | 'one'
+    this.repeat = 'off';
     this.loading = false;
-    this.mode = 'audio';          // 'audio' | 'yt'
     this._listeners = new Set();
     this._loadToken = 0;
-
-    // YouTube backend
-    this.yt = null;
-    this.ytReady = false;
-    this._ytState = -1;
-    this._pendingYT = null;
-    this._ytPoll = null;
-
-    this._volume = this._readVolume();
-    this.audio.volume = this._volume;
-    this.audio.playsInline = true;
-    this.audio.setAttribute('playsinline', '');
-    this.audio.setAttribute('webkit-playsinline', 'true');
     this._lastLoadedId = null;
+    this._volume = this._readVolume();
+    this._intendedPlaying = false;
 
-    this.audio.addEventListener('timeupdate', () => { if (this.mode === 'audio') this._emit('progress'); });
-    this.audio.addEventListener('durationchange', () => { if (this.mode === 'audio') this._emit('progress'); });
-    this.audio.addEventListener('play',  () => { if (this.mode === 'audio'){ this._syncMediaSessionState(); this._emit('state'); } });
-    this.audio.addEventListener('pause', () => { if (this.mode === 'audio'){ this._syncMediaSessionState(); this._emit('state'); } });
-    this.audio.addEventListener('waiting', () => { if (this.mode === 'audio'){ this.loading = true; this._emit('state'); } });
-    this.audio.addEventListener('playing', () => { if (this.mode === 'audio'){ this.loading = false; this._emit('state'); } });
-    this.audio.addEventListener('canplay', () => { if (this.mode === 'audio'){ this.loading = false; this._emit('state'); } });
-    this.audio.addEventListener('ended', () => { if (this.mode === 'audio') this._onEnded(); });
-    this.audio.addEventListener('error', () => { if (this.mode === 'audio') this._onError(); });
+    if (document.readyState === 'loading'){
+      document.addEventListener('DOMContentLoaded', () => this._initAudio());
+    } else {
+      this._initAudio();
+    }
+  }
+
+  _initAudio(){
+    if (this._audio) return;
+    const dom = document.getElementById('florAudio');
+    this._audio = dom || new Audio();
+    this._audio.preload = 'auto';
+    this._audio.volume = this._volume;
+    this._audio.playsInline = true;
+    this._audio.setAttribute('playsinline', '');
+    this._audio.setAttribute('webkit-playsinline', 'true');
+
+    this._audio.addEventListener('timeupdate', () => {
+      this._updatePositionState();
+      this._emit('progress');
+    });
+    this._audio.addEventListener('durationchange', () => this._emit('progress'));
+    this._audio.addEventListener('play',  () => { this._intendedPlaying = true; this._syncMediaSessionState(); this._emit('state'); });
+    this._audio.addEventListener('pause', () => { this._syncMediaSessionState(); this._emit('state'); });
+    this._audio.addEventListener('waiting', () => { this.loading = true; this._emit('state'); });
+    this._audio.addEventListener('playing', () => { this.loading = false; this._syncMediaSessionState(); this._emit('state'); });
+    this._audio.addEventListener('canplay', () => { this.loading = false; this._emit('state'); });
+    this._audio.addEventListener('ended', () => this._onEnded());
+    this._audio.addEventListener('error', () => this._onError());
+    this._audio.addEventListener('stalled', () => {
+      if (this._intendedPlaying && this._audio.paused) this._audio.play().catch(() => {});
+    });
 
     this._bindBackgroundHelpers();
-    this._loadYouTubeAPI();
+  }
+
+  get audio(){
+    if (!this._audio) this._initAudio();
+    return this._audio;
   }
 
   _bindBackgroundHelpers(){
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden || !this.current) return;
+      if (!this.current) return;
       this._syncMediaSessionState();
-      if (this.mode === 'audio' && this.playing && this.audio.paused){
+      this._updatePositionState();
+      if (this._intendedPlaying && this.audio.paused){
         this.audio.play().catch(() => {});
       }
     });
     window.addEventListener('pageshow', () => {
       if (!this.current) return;
       this._syncMediaSessionState();
-      if (this.mode === 'audio' && this.playing && this.audio.paused){
+      if (this._intendedPlaying && this.audio.paused){
         this.audio.play().catch(() => {});
       }
     });
@@ -67,38 +81,25 @@ class Player {
     if (!track || this._lastLoadedId === track.id) return;
     this._lastLoadedId = track.id;
     delete track._streamRetry;
-    delete track._proxyTried;
-    delete track._pipedTried;
-    delete track._serverYtTried;
-    delete track._useYtIframe;
   }
 
-  /* ---------- subscription ---------- */
   subscribe(fn){ this._listeners.add(fn); return () => this._listeners.delete(fn); }
   _emit(type){ for (const fn of this._listeners) fn(type, this); }
 
-  /* ---------- getters ---------- */
   get current(){ return this.index >= 0 ? this.queue[this.index] : null; }
-  get playing(){
-    if (this.mode === 'yt') return this._ytState === 1 || this._ytState === 3;
-    return !this.audio.paused && !this.audio.ended;
-  }
-  get currentTime(){
-    if (this.mode === 'yt') return (this.yt && this.yt.getCurrentTime) ? this.yt.getCurrentTime() : 0;
-    return this.audio.currentTime || 0;
-  }
+  get playing(){ return this._intendedPlaying && !this.audio.paused && !this.audio.ended; }
+  get currentTime(){ return this.audio.currentTime || 0; }
   get duration(){
-    if (this.mode === 'yt'){ const d = this.yt && this.yt.getDuration ? this.yt.getDuration() : 0; return d > 0 ? d : (this.current?.duration || 0); }
     const d = this.audio.duration;
     if (Number.isFinite(d) && d > 0) return d;
     return this.current?.duration || 0;
   }
   get progress(){ const d = this.duration; return d ? Math.min(1, this.currentTime / d) : 0; }
   get volume(){ return this._volume; }
+  get mode(){ return 'audio'; }
 
-  /* ---------- queue control ---------- */
   async playQueue(tracks, startIndex = 0){
-    if (!tracks || !tracks.length) return;
+    if (!tracks?.length) return;
     this.queue = tracks.slice();
     this.index = Math.max(0, Math.min(startIndex, tracks.length - 1));
     await this._load(true);
@@ -116,18 +117,12 @@ class Player {
     this._emit('queue');
   }
 
-  /* ---------- transport ---------- */
   async toggle(){
     if (!this.current) return;
-    if (this.mode === 'yt'){
-      if (!this.yt) return;
-      if (this.playing) this.yt.pauseVideo(); else this.yt.playVideo();
-      return;
-    }
-    if (this.playing) this.audio.pause();
-    else { try { await this.audio.play(); } catch {} }
+    if (this.playing){ this._intendedPlaying = false; this.audio.pause(); }
+    else { this._intendedPlaying = true; try { await this.audio.play(); } catch {} }
   }
-  pause(){ if (this.mode === 'yt'){ this.yt && this.yt.pauseVideo(); } else this.audio.pause(); }
+  pause(){ this._intendedPlaying = false; this.audio.pause(); }
 
   async next(auto = false){
     if (!this.queue.length) return;
@@ -159,25 +154,25 @@ class Player {
 
   seekFraction(f){
     const d = this.duration; if (!d) return;
-    const t = Math.max(0, Math.min(1, f)) * d;
-    if (this.mode === 'yt'){ this.yt && this.yt.seekTo(t, true); }
-    else this.audio.currentTime = t;
+    this.audio.currentTime = Math.max(0, Math.min(1, f)) * d;
+    this._updatePositionState();
     this._emit('progress');
   }
   setVolume(v){
     v = Math.max(0, Math.min(1, v));
     this._volume = v;
     this.audio.volume = v;
-    if (this.ytReady && this.yt) this.yt.setVolume(v * 100);
     this._saveVolume(v);
     this._emit('state');
   }
   toggleShuffle(){ this.shuffle = !this.shuffle; this._emit('state'); }
   cycleRepeat(){ this.repeat = this.repeat === 'off' ? 'all' : this.repeat === 'all' ? 'one' : 'off'; this._emit('state'); }
 
-  _play(){ if (this.mode === 'yt'){ this.yt && this.yt.playVideo(); } else this.audio.play().catch(() => {}); }
+  _play(){
+    this._intendedPlaying = true;
+    this.audio.play().catch(() => {});
+  }
 
-  /* ---------- internals: loading ---------- */
   async _load(autoplay){
     const track = this.current;
     if (!track) return;
@@ -185,91 +180,34 @@ class Player {
     this.loading = true;
     this._resetTrackRetries(track);
 
-    // YouTube: HTML5 audio works in background; iframe stops when screen locks.
-    if (track.source === 'youtube' && !track.streamUrl && !track._useYtIframe){
-      if (!track._pipedTried){
-        track._pipedTried = true;
-        const piped = await Promise.race([
-          youtubePipedAudioUrl(track.rawId),
-          new Promise(r => setTimeout(() => r(null), 10000)),
-        ]);
-        if (token !== this._loadToken) return;
-        if (piped) track.streamUrl = piped;
-        else track._useYtIframe = true;
-      }
-    }
-
-    if (track.source === 'youtube' && !track.streamUrl && track._useYtIframe){
-      // Fallback only: no proxied audio URL → use the YouTube IFrame backend.
-      this.mode = 'yt';
-      try { this.audio.pause(); } catch {}
-      this._emit('change'); this._emit('state');
-      if (this.ytReady && this.yt){ this.yt.loadVideoById(track.rawId); this.yt.setVolume(this._volume * 100); }
-      else { this._pendingYT = { rawId: track.rawId, autoplay }; }
-      this._startYTPoll();
-      this._ytLoadTimer = setTimeout(() => { if (this.loading && this.mode === 'yt') this._onError(); }, 18000);
+    const src = playUrl(track);
+    if (!src){
+      this.loading = false;
+      this._emit('mediaerror');
+      if (this.queue.length > 1) setTimeout(() => this.next(true), 400);
       return;
     }
 
-    // HTML5 audio backend.
-    this.mode = 'audio';
-    this._stopYTPoll();
-    if (this.ytReady && this.yt){ try { this.yt.stopVideo(); } catch {} }
-    this._ytState = -1;
-    this._emit('change'); this._emit('state');
+    this._emit('change');
+    this._emit('state');
 
     try {
-      const resolveSrc = async () => {
-        let src = track.streamUrl;
-        if (!src && track.source === 'audius'){
-          src = audiusStreamUrlSync(track.rawId);
-          if (src) track.streamUrl = src;
-        }
-        if (!src && track.source === 'audius'){
-          src = await audiusStreamUrl(track.rawId);
-          track.streamUrl = src;
-        }
-        if (!src && track.source === 'soundcloud'){
-          src = await soundcloudStreamUrl(track.rawId);
-          track.streamUrl = src;
-        }
-        if (!src && track.source === 'youtube'){
-          src = '/api/yt/audio?id=' + encodeURIComponent(track.rawId);
-          track.streamUrl = src;
-        }
-        return src;
-      };
-      const src = await Promise.race([
-        resolveSrc(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000)),
-      ]);
       if (token !== this._loadToken) return;
-      if (!src) throw new Error('no source');
       this.audio.src = src;
       this.audio.volume = this._volume;
       this.audio.load();
       this._updateMediaSession(track);
-      if (autoplay){ try { await this.audio.play(); } catch {} }
+      if (autoplay){
+        this._intendedPlaying = true;
+        try { await this.audio.play(); } catch { this._intendedPlaying = false; }
+      }
+      if (token === this._loadToken) this.loading = false;
     } catch (e){
       if (token !== this._loadToken) return;
       this.loading = false;
-      const t = this.current;
-      if (t && t.source === 'audius' && !t._streamRetry){
-        t._streamRetry = true;
-        t.streamUrl = null;
-        this._load(true);
-        return;
-      }
-      if (t && t.source === 'soundcloud' && !t._streamRetry){
-        t._streamRetry = true;
-        t.streamUrl = null;
-        this._load(true);
-        return;
-      }
-      if (t && t.source === 'youtube' && !t._serverYtTried){
-        t._serverYtTried = true;
-        t.streamUrl = '/api/yt/audio?id=' + encodeURIComponent(t.rawId);
-        t._useYtIframe = false;
+      if (track && !track._streamRetry){
+        track._streamRetry = true;
+        track.streamUrl = null;
         this._load(true);
         return;
       }
@@ -279,81 +217,21 @@ class Player {
   }
 
   _onEnded(){ this.next(true); }
+
   async _onError(){
     this.loading = false;
     const t = this.current;
-    if (t && t.source === 'audius' && !t._streamRetry){
+    if (t && !t._streamRetry){
       t._streamRetry = true;
       t.streamUrl = null;
-      const fresh = await audiusStreamUrl(t.rawId);
-      if (fresh){ t.streamUrl = fresh; this._load(true); return; }
-    }
-    if (t && t.source === 'soundcloud' && !t._streamRetry){
-      t._streamRetry = true;
-      t.streamUrl = null;
-      const fresh = await soundcloudStreamUrl(t.rawId);
-      if (fresh){ t.streamUrl = fresh; this._load(true); return; }
-    }
-    if (t && t.source === 'youtube' && !t._serverYtTried){
-      t._serverYtTried = true;
-      t.streamUrl = '/api/yt/audio?id=' + encodeURIComponent(t.rawId);
-      t._useYtIframe = false;
       this._load(true);
       return;
     }
-    // YouTube IFrame failed — try Piped, then server proxy.
-    if (t && t.source === 'youtube' && this.mode === 'yt' && !t._proxyTried){
-      t._proxyTried = true;
-      const piped = await youtubePipedAudioUrl(t.rawId);
-      t.streamUrl = piped || ('/api/yt/audio?id=' + encodeURIComponent(t.rawId));
-      t._useYtIframe = false;
-      this._load(true);
-      return;
-    }
+    this._intendedPlaying = false;
     this._emit('mediaerror');
     if (this.queue.length > 1) setTimeout(() => this.next(true), 400);
   }
 
-  /* ---------- internals: YouTube ---------- */
-  _loadYouTubeAPI(){
-    if (window.YT && window.YT.Player){ this._initYT(); return; }
-    const prev = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => { if (typeof prev === 'function') prev(); this._initYT(); };
-    if (!document.getElementById('yt-iframe-api')){
-      const s = document.createElement('script');
-      s.id = 'yt-iframe-api';
-      s.src = 'https://www.youtube.com/iframe_api';
-      document.head.appendChild(s);
-    }
-  }
-  _initYT(){
-    if (this.yt || !window.YT || !window.YT.Player) return;
-    const mount = document.getElementById('ytplayer');
-    if (!mount) return;
-    this.yt = new window.YT.Player('ytplayer', {
-      height: '180', width: '320',
-      playerVars: { autoplay: 0, controls: 0, disablekb: 1, modestbranding: 1, playsinline: 1, rel: 0, origin: location.origin },
-      events: {
-        onReady: () => {
-          this.ytReady = true;
-          this.yt.setVolume(this._volume * 100);
-          if (this._pendingYT){ const { rawId } = this._pendingYT; this._pendingYT = null; this.yt.loadVideoById(rawId); }
-        },
-        onStateChange: (e) => {
-          this._ytState = e.data;
-          if (e.data === 3){ this.loading = true; }
-          if (e.data === 1){ this.loading = false; this._updateMediaSession(this.current); this._syncMediaSessionState(); }
-          if (e.data === 0){ this._onEnded(); }
-          this._emit('state');
-        },
-        onError: () => { this._onError(); },
-      },
-    });
-  }
-  _startYTPoll(){ this._stopYTPoll(); this._ytPoll = setInterval(() => { if (this.mode === 'yt') this._emit('progress'); }, 500); }
-  _stopYTPoll(){ if (this._ytPoll){ clearInterval(this._ytPoll); this._ytPoll = null; } if (this._ytLoadTimer){ clearTimeout(this._ytLoadTimer); this._ytLoadTimer = null; } }
-
-  /* ---------- media session ---------- */
   _syncMediaSessionState(){
     if (!('mediaSession' in navigator)) return;
     try {
@@ -361,21 +239,36 @@ class Player {
     } catch {}
   }
 
+  _updatePositionState(){
+    if (!('mediaSession' in navigator) || !('setPositionState' in navigator.mediaSession)) return;
+    const d = this.duration;
+    if (!d || !Number.isFinite(d)) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: d,
+        playbackRate: 1,
+        position: Math.min(this.currentTime, d),
+      });
+    } catch {}
+  }
+
   _updateMediaSession(track){
     if (!track || !('mediaSession' in navigator)) return;
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
-        title: track.title, artist: track.artist, album: track.album || 'FLOR',
+        title: track.title,
+        artist: track.artist,
+        album: track.album || 'FLOR MUSIC',
         artwork: track.artwork ? [{ src: track.artwork, sizes: '512x512', type: 'image/jpeg' }] : [],
       });
-      navigator.mediaSession.setActionHandler('play',  () => this.toggle());
-      navigator.mediaSession.setActionHandler('pause', () => this.toggle());
+      navigator.mediaSession.setActionHandler('play', () => { this._intendedPlaying = true; this.audio.play().catch(() => {}); });
+      navigator.mediaSession.setActionHandler('pause', () => { this._intendedPlaying = false; this.audio.pause(); });
       navigator.mediaSession.setActionHandler('nexttrack', () => this.next());
       navigator.mediaSession.setActionHandler('previoustrack', () => this.prev());
+      navigator.mediaSession.setActionHandler('seekto', d => {
+        if (d?.seekTime != null) this.audio.currentTime = d.seekTime;
+      });
       this._syncMediaSessionState();
-      // Many covers aren't square (YouTube 16:9 etc.), which the iOS player shows
-      // letterboxed with black bars. Re-draw to a centred square so the system
-      // player always gets clean square artwork.
       this._squareArtwork(track);
     } catch {}
   }
@@ -397,7 +290,7 @@ class Player {
         ctx.drawImage(img, sx, sy, side, side, 0, 0, S, S);
         const url = c.toDataURL('image/jpeg', 0.9);
         navigator.mediaSession.metadata = new MediaMetadata({
-          title: track.title, artist: track.artist, album: track.album || 'FLOR',
+          title: track.title, artist: track.artist, album: track.album || 'FLOR MUSIC',
           artwork: [{ src: url, sizes: '512x512', type: 'image/jpeg' }],
         });
       } catch {}

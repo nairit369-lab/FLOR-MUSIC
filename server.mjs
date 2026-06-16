@@ -406,6 +406,20 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ---- API: Audius audio stream (proxied — same-origin for background play) ----
+  if (urlPath === '/api/audius/stream'){
+    try {
+      const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
+      if (!/^[\w-]+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      const media = await audiusMediaUrl(id);
+      if (!media){ res.writeHead(502); return res.end('no stream'); }
+      return pipeAudio(req, res, media);
+    } catch (e){
+      if (!res.headersSent) res.writeHead(502);
+      return res.end('audius stream error');
+    }
+  }
+
   // ---- API: YouTube search (server-side, no key, no CORS) ----
   if (urlPath === '/api/yt/search'){
     const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
@@ -449,18 +463,44 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ items }));
   }
 
-  // ---- API: SoundCloud stream (resolve + redirect to media) ----
+  // ---- API: SoundCloud stream (resolve URL for JSON clients) ----
   if (urlPath === '/api/sc/stream'){
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^\d+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
       const media = await scStreamUrl(id);
       if (!media){ res.writeHead(502); return res.end('no stream'); }
-      res.writeHead(302, { Location: media, 'Cache-Control': 'no-store' });
-      return res.end();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ url: media }));
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
       return res.end('stream error');
+    }
+  }
+
+  // ---- API: SoundCloud audio (proxied — same-origin for background play) ----
+  if (urlPath === '/api/sc/audio'){
+    try {
+      const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
+      if (!/^\d+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      const media = await scStreamUrl(id);
+      if (!media){ res.writeHead(502); return res.end('no stream'); }
+      return pipeAudio(req, res, media);
+    } catch (e){
+      if (!res.headersSent) res.writeHead(502);
+      return res.end('sc audio error');
+    }
+  }
+
+  // ---- API: external audio (iTunes preview, radio — proxied) ----
+  if (urlPath === '/api/external/audio'){
+    try {
+      const u = new URL(req.url, 'http://x').searchParams.get('u') || '';
+      if (!/^https?:\/\//i.test(u)){ res.writeHead(400); return res.end('bad url'); }
+      return pipeAudio(req, res, u);
+    } catch (e){
+      if (!res.headersSent) res.writeHead(502);
+      return res.end('external audio error');
     }
   }
 
@@ -557,6 +597,35 @@ async function audiusProxy(path, params){
   if (!qs.has('app_name')) qs.set('app_name', 'FLOR-Music');
   const r = await serverFetch(`${host}${path}?${qs}`);
   return r.json();
+}
+
+async function audiusMediaUrl(trackId){
+  const host = await audiusGetHost();
+  const streamUrl = `${host}/v1/tracks/${trackId}/stream?app_name=FLOR-Music`;
+  const r = await fetch(streamUrl, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(12000) });
+  if (r.status >= 300 && r.status < 400){
+    const loc = r.headers.get('location');
+    if (loc) return loc.startsWith('http') ? loc : new URL(loc, host).href;
+  }
+  if (r.ok) return streamUrl;
+  return null;
+}
+
+async function pipeAudio(req, res, upstreamUrl){
+  const headers = { 'User-Agent': 'Mozilla/5.0' };
+  if (req.headers.range) headers['Range'] = req.headers.range;
+  const up = await fetch(upstreamUrl, { headers, redirect: 'follow', signal: AbortSignal.timeout(30000) });
+  if (!up.ok && up.status !== 206){
+    res.writeHead(up.status || 502);
+    return res.end('upstream error');
+  }
+  const h = { 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
+  const ct = up.headers.get('content-type'); if (ct) h['Content-Type'] = ct;
+  const cl = up.headers.get('content-length'); if (cl) h['Content-Length'] = cl;
+  const cr = up.headers.get('content-range'); if (cr) h['Content-Range'] = cr;
+  res.writeHead(up.status, h);
+  if (up.body) Readable.fromWeb(up.body).pipe(res);
+  else res.end();
 }
 
 /* ============================================================
