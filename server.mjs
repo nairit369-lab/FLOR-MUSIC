@@ -485,12 +485,14 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^[\w-]+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      const workerPath = `/audius/stream?id=${encodeURIComponent(id)}`;
+      if (PROXY.workerUrl){
+        try { return await pipeFromWorker(req, res, workerPath); } catch {}
+      }
       const media = await audiusMediaUrl(id).catch(() => null);
-      return pipeAudioWithFallback(req, res, {
-        localUrl: media,
-        workerPath: `/audius/stream?id=${encodeURIComponent(id)}`,
-        workerFirst: true,
-      });
+      if (media) return pipeAudio(req, res, media);
+      if (!res.headersSent) res.writeHead(502);
+      return res.end('no stream');
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
       return res.end('audius stream error');
@@ -500,13 +502,14 @@ const server = http.createServer(async (req, res) => {
   // ---- API: YouTube search (server-side, no key, no CORS) ----
   if (urlPath === '/api/yt/search'){
     const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
-    let items = await ytSearch(q).catch(() => []);
-    if (!items.length && PROXY.workerUrl){
+    let items = [];
+    if (PROXY.workerUrl){
       try {
         const wr = await fetch(`${PROXY.workerUrl}/yt/search?q=${encodeURIComponent(q)}`, { signal: AbortSignal.timeout(10000) });
         if (wr.ok){ const wj = await wr.json(); items = wj.items || []; }
       } catch {}
     }
+    if (!items.length) items = await ytSearch(q).catch(() => []);
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ items }));
   }
@@ -516,12 +519,14 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^[\w-]{6,20}$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      const workerPath = `/yt/stream?id=${encodeURIComponent(id)}`;
+      if (PROXY.workerUrl){
+        try { return await pipeFromWorker(req, res, workerPath); } catch {}
+      }
       const audioUrl = await ytAudioUrl(id).catch(() => null);
-      return pipeAudioWithFallback(req, res, {
-        localUrl: audioUrl,
-        workerPath: `/yt/stream?id=${encodeURIComponent(id)}`,
-        workerFirst: true,
-      });
+      if (audioUrl) return pipeAudio(req, res, audioUrl);
+      if (!res.headersSent) res.writeHead(502);
+      res.end('no audio');
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
       res.end('audio error');
@@ -532,13 +537,14 @@ const server = http.createServer(async (req, res) => {
   // ---- API: SoundCloud search ----
   if (urlPath === '/api/sc/search'){
     const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
-    let items = await scSearch(q).catch(() => []);
-    if (!items.length && PROXY.workerUrl){
+    let items = [];
+    if (PROXY.workerUrl){
       try {
         const wr = await fetch(`${PROXY.workerUrl}/sc/search?q=${encodeURIComponent(q)}`, { signal: AbortSignal.timeout(10000) });
         if (wr.ok){ const wj = await wr.json(); items = wj.items || []; }
       } catch {}
     }
+    if (!items.length) items = await scSearch(q).catch(() => []);
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ items }));
   }
@@ -563,12 +569,14 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^\d+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      const workerPath = `/sc/audio?id=${encodeURIComponent(id)}`;
+      if (PROXY.workerUrl){
+        try { return await pipeFromWorker(req, res, workerPath); } catch {}
+      }
       const media = await scStreamUrl(id).catch(() => null);
-      return pipeAudioWithFallback(req, res, {
-        localUrl: media,
-        workerPath: `/sc/audio?id=${encodeURIComponent(id)}`,
-        workerFirst: true,
-      });
+      if (media) return pipeAudio(req, res, media);
+      if (!res.headersSent) res.writeHead(502);
+      return res.end('no stream');
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
       return res.end('sc audio error');
