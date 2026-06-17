@@ -231,6 +231,18 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ ok: true }));
   }
 
+  // ---- API: which music sources work from this server / CF Worker ----
+  if (urlPath === '/api/health/sources'){
+    try {
+      const data = await probeServerSources();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(data));
+    } catch {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ worker: false, workerConfigured: !!PROXY.workerUrl, youtube: false, audius: false }));
+    }
+  }
+
   // ---- API: public config (Cloudflare Worker URL for music proxy) ----
   if (urlPath === '/api/config'){
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -411,9 +423,11 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^[\w-]+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
-      const media = await audiusMediaUrl(id);
-      if (!media){ res.writeHead(502); return res.end('no stream'); }
-      return pipeAudio(req, res, media);
+      const media = await audiusMediaUrl(id).catch(() => null);
+      return pipeAudioWithFallback(req, res, {
+        localUrl: media,
+        workerPath: `/audius/stream?id=${encodeURIComponent(id)}`,
+      });
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
       return res.end('audius stream error');
@@ -428,26 +442,16 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ items }));
   }
 
-  // ---- API: YouTube AUDIO stream (proxied) ----
-  // YouTube video/googlevideo is throttled or blocked by some ISPs (e.g. in RU),
-  // and the IFrame player then shows "video unavailable". We instead resolve an
-  // audio-only stream through a foreign Piped instance and pipe it through this
-  // server, so the browser only ever talks to localhost + a non-Google host.
+  // ---- API: YouTube AUDIO stream (proxied, CF Worker fallback) ----
   if (urlPath === '/api/yt/audio'){
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^[\w-]{6,20}$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
-      const audioUrl = await ytAudioUrl(id);
-      if (!audioUrl){ res.writeHead(502); return res.end('no audio'); }
-      const headers = { 'User-Agent': 'Mozilla/5.0' };
-      if (req.headers.range) headers['Range'] = req.headers.range;
-      const up = await fetch(audioUrl, { headers });
-      const h = { 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
-      const ct = up.headers.get('content-type'); if (ct) h['Content-Type'] = ct;
-      const cl = up.headers.get('content-length'); if (cl) h['Content-Length'] = cl;
-      const cr = up.headers.get('content-range'); if (cr) h['Content-Range'] = cr;
-      res.writeHead(up.status, h);
-      if (up.body) Readable.fromWeb(up.body).pipe(res); else res.end();
+      const audioUrl = await ytAudioUrl(id).catch(() => null);
+      return pipeAudioWithFallback(req, res, {
+        localUrl: audioUrl,
+        workerPath: `/yt/stream?id=${encodeURIComponent(id)}`,
+      });
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
       res.end('audio error');
@@ -483,9 +487,11 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^\d+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
-      const media = await scStreamUrl(id);
-      if (!media){ res.writeHead(502); return res.end('no stream'); }
-      return pipeAudio(req, res, media);
+      const media = await scStreamUrl(id).catch(() => null);
+      return pipeAudioWithFallback(req, res, {
+        localUrl: media,
+        workerPath: `/sc/audio?id=${encodeURIComponent(id)}`,
+      });
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
       return res.end('sc audio error');
@@ -626,6 +632,36 @@ async function pipeAudio(req, res, upstreamUrl){
   res.writeHead(up.status, h);
   if (up.body) Readable.fromWeb(up.body).pipe(res);
   else res.end();
+}
+
+async function pipeFromWorker(req, res, workerPath){
+  if (!PROXY.workerUrl) throw new Error('no worker');
+  const url = `${PROXY.workerUrl}${workerPath}`;
+  const headers = { 'User-Agent': 'Mozilla/5.0' };
+  if (req.headers.range) headers['Range'] = req.headers.range;
+  const up = await fetch(url, { headers, signal: AbortSignal.timeout(120000) });
+  if (!up.ok && up.status !== 206){
+    res.writeHead(up.status || 502);
+    return res.end('worker error');
+  }
+  const h = { 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
+  const ct = up.headers.get('content-type'); if (ct) h['Content-Type'] = ct;
+  const cl = up.headers.get('content-length'); if (cl) h['Content-Length'] = cl;
+  const cr = up.headers.get('content-range'); if (cr) h['Content-Range'] = cr;
+  res.writeHead(up.status, h);
+  if (up.body) Readable.fromWeb(up.body).pipe(res);
+  else res.end();
+}
+
+async function pipeAudioWithFallback(req, res, { localUrl, workerPath }){
+  if (localUrl){
+    try { return await pipeAudio(req, res, localUrl); } catch {}
+  }
+  if (PROXY.workerUrl && workerPath){
+    try { return await pipeFromWorker(req, res, workerPath); } catch {}
+  }
+  if (!res.headersSent) res.writeHead(502);
+  res.end('no stream');
 }
 
 /* ============================================================
@@ -771,6 +807,26 @@ async function ytAudioUrl(id){
     if (url){ audioCache.set(id, { at: Date.now(), url }); return url; }
   } catch {}
   return null;
+}
+
+async function probeServerSources(){
+  let worker = false;
+  if (PROXY.workerUrl){
+    try {
+      const r = await fetch(`${PROXY.workerUrl}/health`, { signal: AbortSignal.timeout(6000) });
+      worker = r.ok;
+    } catch {}
+  }
+  let youtube = false;
+  for (const inst of PIPED.slice(0, 4)){
+    try {
+      const r = await fetch(`${inst}/health`, { signal: AbortSignal.timeout(5000) });
+      if (r.ok){ youtube = true; break; }
+    } catch {}
+  }
+  let audius = false;
+  try { await audiusGetHost(); audius = true; } catch {}
+  return { worker, workerConfigured: !!PROXY.workerUrl, youtube, audius };
 }
 
 /* ============================================================

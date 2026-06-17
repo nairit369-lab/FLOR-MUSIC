@@ -16,6 +16,7 @@
   .main{ height:100dvh; border:none; border-radius:0; display:flex; flex-direction:column; min-height:0; }
   .content{ flex:1; min-height:0; overflow-y:auto; padding:0; border-radius:0; }
   .content-inner{ padding-bottom: calc(176px + env(safe-area-inset-bottom, 0px)); }
+  .vpn-banner{ margin:8px 16px 0; font-size:12px; }
 
   /* desktop screen renderers are replaced by .mscreen on mobile */
   .screen > :not(.mscreen){ }

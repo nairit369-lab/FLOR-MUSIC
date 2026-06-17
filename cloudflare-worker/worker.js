@@ -8,7 +8,7 @@ const APP = 'FLOR-Music';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Range',
 };
 
 const INVIDIOUS = [
@@ -184,6 +184,32 @@ async function audiusProxy(path, params){
   return r.json();
 }
 
+async function audiusMediaUrl(trackId){
+  const host = await audiusGetHost();
+  const streamUrl = `${host}/v1/tracks/${trackId}/stream?app_name=${APP}`;
+  const r = await fetch(streamUrl, { redirect: 'manual', headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(12000) });
+  if (r.status >= 300 && r.status < 400){
+    const loc = r.headers.get('location');
+    if (loc) return loc.startsWith('http') ? loc : new URL(loc, host).href;
+  }
+  if (r.ok) return streamUrl;
+  return null;
+}
+
+async function pipeStream(request, upstreamUrl){
+  const headers = { 'User-Agent': UA };
+  const range = request.headers.get('Range');
+  if (range) headers['Range'] = range;
+  const up = await fetch(upstreamUrl, { headers, redirect: 'follow' });
+  const h = new Headers(CORS);
+  h.set('Accept-Ranges', 'bytes');
+  h.set('Cache-Control', 'no-store');
+  const ct = up.headers.get('content-type'); if (ct) h.set('Content-Type', ct);
+  const cl = up.headers.get('content-length'); if (cl) h.set('Content-Length', cl);
+  const cr = up.headers.get('content-range'); if (cr) h.set('Content-Range', cr);
+  return new Response(up.body, { status: up.status, headers: h });
+}
+
 export default {
   async fetch(request){
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
@@ -204,18 +230,35 @@ export default {
         if (!audioUrl) return json({ url: null, error: 'no audio' }, 502);
         return json({ url: audioUrl });
       }
+      if (path === '/yt/stream'){
+        const audioUrl = await ytAudioUrl(q.get('id') || '');
+        if (!audioUrl) return new Response('no audio', { status: 502, headers: CORS });
+        return pipeStream(request, audioUrl);
+      }
 
       if (path === '/sc/search'){
         const items = await scSearch(q.get('q') || '');
         return json({ items });
       }
       if (path === '/sc/stream'){
-        const media = await scStreamUrl(q.get('id') || '');
+        const id = q.get('id') || '';
+        const media = await scStreamUrl(id);
         if (!media) return json({ url: null }, 502);
         return json({ url: media });
       }
+      if (path === '/sc/audio'){
+        const media = await scStreamUrl(q.get('id') || '');
+        if (!media) return new Response('no stream', { status: 502, headers: CORS });
+        return pipeStream(request, media);
+      }
 
       if (path === '/audius/host') return json({ host: await audiusGetHost() });
+      if (path === '/audius/stream'){
+        const id = q.get('id') || '';
+        const media = await audiusMediaUrl(id);
+        if (!media) return new Response('no stream', { status: 502, headers: CORS });
+        return pipeStream(request, media);
+      }
 
       if (path === '/audius/search'){
         return json(await audiusProxy('/v1/tracks/search', {

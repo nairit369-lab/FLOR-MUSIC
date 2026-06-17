@@ -14,8 +14,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="FLOR MUSIC">
 <meta name="format-detection" content="telephone=no">
-<link rel="stylesheet" href="styles.css?v=19">
-<link rel="stylesheet" href="mobile.css?v=19">
+<link rel="stylesheet" href="styles.css?v=20">
+<link rel="stylesheet" href="mobile.css?v=20">
 </head>
 <body>
 <div class="app" id="app">
@@ -78,6 +78,11 @@
       </div>
       <div class="avatar" id="avatar">F</div>
     </header>
+
+    <div id="vpnBanner" class="vpn-banner" hidden>
+      <span id="vpnBannerText"></span>
+      <button type="button" id="vpnBannerClose" class="vpn-banner-close" aria-label="Закрыть">×</button>
+    </div>
 
     <div class="content scroll">
       <div class="content-inner" id="screens"></div>
@@ -200,6 +205,6 @@
   <div class="modal" id="modalBox"></div>
 </div>
 
-<script type="module" src="js/app.js?v=19"></script>
+<script type="module" src="js/app.js?v=20"></script>
 </body>
 </html>

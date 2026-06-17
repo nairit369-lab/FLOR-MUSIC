@@ -2,7 +2,7 @@
    FLOR MUSIC — Audio playback engine
    All streams go through same-origin server proxy → background play on iOS/PWA.
    ============================================================ */
-import { playUrl } from './api.js?v=19';
+import { playUrl, canPlaySource, netHint } from './api.js?v=20';
 
 class Player {
   constructor(){
@@ -34,6 +34,10 @@ class Player {
     this._audio.playsInline = true;
     this._audio.setAttribute('playsinline', '');
     this._audio.setAttribute('webkit-playsinline', 'true');
+
+    if ('audioSession' in navigator){
+      try { navigator.audioSession.type = 'playback'; } catch {}
+    }
 
     this._audio.addEventListener('timeupdate', () => {
       this._updatePositionState();
@@ -74,6 +78,11 @@ class Player {
       if (this._intendedPlaying && this.audio.paused){
         this.audio.play().catch(() => {});
       }
+    });
+    window.addEventListener('pagehide', () => {
+      if (!this.current || !this._intendedPlaying) return;
+      this._syncMediaSessionState();
+      this._updatePositionState();
     });
   }
 
@@ -180,6 +189,14 @@ class Player {
     this.loading = true;
     this._resetTrackRetries(track);
 
+    if (!canPlaySource(track.source)){
+      this.loading = false;
+      this._intendedPlaying = false;
+      this._emit('blocked', track);
+      if (this.queue.length > 1) setTimeout(() => this.next(true), 400);
+      return;
+    }
+
     const src = playUrl(track);
     if (!src){
       this.loading = false;
@@ -193,10 +210,10 @@ class Player {
 
     try {
       if (token !== this._loadToken) return;
+      this._updateMediaSession(track);
       this.audio.src = src;
       this.audio.volume = this._volume;
       this.audio.load();
-      this._updateMediaSession(track);
       if (autoplay){
         this._intendedPlaying = true;
         try { await this.audio.play(); } catch { this._intendedPlaying = false; }

@@ -63,7 +63,24 @@
 
 /* ---------- Reset ---------- */
 *{ box-sizing: border-box; margin:0; padding:0; }
-#florAudio{ position:fixed; width:0; height:0; opacity:0; pointer-events:none; z-index:-1; }
+#florAudio{
+  position:fixed; left:0; bottom:0;
+  width:1px; height:1px;
+  opacity:0.001; pointer-events:none; z-index:0;
+  clip:rect(0,0,0,0); overflow:hidden;
+}
+.vpn-banner{
+  display:flex; align-items:center; gap:10px;
+  margin:0 16px 8px; padding:10px 14px;
+  background:rgba(255,80,80,.12); border:1px solid rgba(255,80,80,.25);
+  border-radius:12px; font-size:13px; line-height:1.4; color:var(--text-2);
+}
+.vpn-banner[hidden]{ display:none !important; }
+.vpn-banner-close{
+  flex-shrink:0; margin-left:auto;
+  background:none; border:none; color:var(--text-3);
+  font-size:20px; line-height:1; cursor:pointer; padding:0 4px;
+}
 html,body{
   height:100%;
   /* App-like touch: no double-tap zoom, no pinch, no page rubber-band */

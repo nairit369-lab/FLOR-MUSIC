@@ -499,6 +499,84 @@ export function playUrl(track){
   return track.streamUrl || null;
 }
 
+/* ============================================================
+   Network probe — what can play from this device / server
+   ============================================================ */
+const PIPED_PROBE = [
+  'https://pipedapi.kavin.rocks',
+  'https://api.piped.private.coffee',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.leptons.xyz',
+];
+
+export const netStatus = {
+  probed: false,
+  clientVpn: false,
+  serverWorker: false,
+  serverYoutube: false,
+  serverAudius: true,
+  youtubeOk: false,
+  soundcloudOk: false,
+};
+
+async function probeClientPiped(){
+  for (const base of PIPED_PROBE){
+    try {
+      const r = await timedFetch(`${base}/health`, {}, 4000);
+      if (r.ok) return true;
+    } catch {}
+  }
+  return false;
+}
+
+async function probeClientSoundcloud(){
+  try {
+    const r = await timedFetch('https://api-v2.soundcloud.com/search/tracks?q=test&limit=1', {
+      headers: { Accept: 'application/json' },
+    }, 5000);
+    return r.ok;
+  } catch { return false; }
+}
+
+export async function probeNetwork(){
+  await loadProxyConfig();
+  const [clientVpn, clientSc, server] = await Promise.all([
+    probeClientPiped(),
+    probeClientSoundcloud(),
+    timedFetch('/api/health/sources', {}, 8000).then(r => r.ok ? r.json() : {}).catch(() => ({})),
+  ]);
+  netStatus.probed = true;
+  netStatus.clientVpn = clientVpn;
+  netStatus.serverWorker = !!server.worker;
+  netStatus.serverYoutube = !!server.youtube;
+  netStatus.serverAudius = server.audius !== false;
+  // Playback goes through our server; worker fallback bypasses RU blocks.
+  netStatus.youtubeOk = !!(server.worker || server.youtube);
+  netStatus.soundcloudOk = !!(server.worker || clientSc);
+  return netStatus;
+}
+
+export function canPlaySource(source){
+  if (!netStatus.probed) return true;
+  if (source === 'youtube') return netStatus.youtubeOk;
+  if (source === 'soundcloud') return netStatus.soundcloudOk;
+  return true;
+}
+
+export function netHint(source){
+  if (!netStatus.probed) return null;
+  if (source === 'youtube' && !netStatus.youtubeOk){
+    if (!netStatus.serverWorker && netStatus.clientVpn){
+      return 'YouTube заблокирован на сервере. Настройте Cloudflare Worker (proxy-config.json) — VPN на телефоне не помогает сам по себе.';
+    }
+    return 'YouTube недоступен. Настройте Cloudflare Worker на сервере или слушайте Audius / iTunes.';
+  }
+  if (source === 'soundcloud' && !netStatus.soundcloudOk){
+    return 'SoundCloud недоступен. Включите VPN или настройте Cloudflare Worker.';
+  }
+  return null;
+}
+
 function normalizeSoundcloud(t){
   if (!t || t.id == null) return null;
   return {

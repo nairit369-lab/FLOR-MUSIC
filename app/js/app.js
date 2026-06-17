@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=19';
-import { player } from './player.js?v=19';
+import { I } from './icons.js?v=20';
+import { player } from './player.js?v=20';
 import {
-  SOURCES, search as apiSearch, primeAudius, loadProxyConfig, homeWaveTracks,
-  audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop,
-} from './api.js?v=19';
+  SOURCES, search as apiSearch, primeAudius, loadProxyConfig, probeNetwork, netStatus, netHint,
+  audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop, homeWaveTracks,
+} from './api.js?v=20';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1912,6 +1912,25 @@ function lockAppGestures(){
   document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
 }
 
+function updateVpnBanner(){
+  const b = $('#vpnBanner');
+  const t = $('#vpnBannerText');
+  if (!b || !t) return;
+  if (!netStatus.probed){ b.hidden = true; return; }
+  if (netStatus.youtubeOk && netStatus.soundcloudOk){ b.hidden = true; return; }
+  try { if (localStorage.getItem('flor-vpn-banner-dismiss')){ b.hidden = true; return; } } catch {}
+  const parts = [];
+  if (!netStatus.youtubeOk) parts.push('YouTube');
+  if (!netStatus.soundcloudOk) parts.push('SoundCloud');
+  if (!parts.length){ b.hidden = true; return; }
+  if (netStatus.clientVpn && !netStatus.serverWorker && !netStatus.serverYoutube){
+    t.textContent = 'VPN на телефоне не проксирует музыку — настройте Cloudflare Worker на сервере (proxy-config.json), иначе ' + parts.join(' / ') + ' не заиграют.';
+  } else {
+    t.textContent = `${parts.join(' и ')} недоступны с сервера. Настройте Cloudflare Worker или слушайте Audius / iTunes.`;
+  }
+  b.hidden = false;
+}
+
 async function init(){
   lockAppGestures();
   let t = 'dark'; try { t = localStorage.getItem('flor-theme') || 'dark'; } catch {}
@@ -1928,6 +1947,12 @@ async function init(){
   let wasMobile = isMobile();
   loadProxyConfig();
   primeAudius();   // warm the Audius host so the first tap can play synchronously
+  probeNetwork().then(() => updateVpnBanner()).catch(() => {});
+  const vpnClose = $('#vpnBannerClose');
+  if (vpnClose) vpnClose.addEventListener('click', () => {
+    try { localStorage.setItem('flor-vpn-banner-dismiss', '1'); } catch {}
+    const b = $('#vpnBanner'); if (b) b.hidden = true;
+  });
   fetch('/api/health').catch(() => {
     const onPhone = location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
     toast(onPhone
@@ -2019,6 +2044,11 @@ async function init(){
   player.subscribe((type) => {
     if (type === 'progress'){ updateProgressUI(); return; }
     if (type === 'change' || type === 'queue') pushRecent(player.current);
+    if (type === 'blocked'){
+      const hint = netHint(player.current?.source);
+      toast(hint || 'Источник недоступен в вашей сети');
+      return;
+    }
     if (type === 'mediaerror') toast('Источник недоступен, пропускаем');
     if (type === 'error' && player.queue.length <= 1) toast('Не удалось воспроизвести');
     updateYtMode();

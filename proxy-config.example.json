@@ -1,4 +1,4 @@
 {
-  "_comment": "URL Cloudflare Worker после деплоя (cloudflare-worker/wrangler.toml). Без слэша в конце.",
-  "workerUrl": "https://flor-music-proxy.ВАШ_АККАУНТ.workers.dev"
+  "_comment": "URL Cloudflare Worker после деплоя. Без слэша в конце.",
+  "workerUrl": "https://cool-flower-6004.nairit369.workers.dev"
 }
