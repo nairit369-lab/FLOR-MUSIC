@@ -10,6 +10,7 @@ node_modules/
 # Переменные окружения
 .env
 .env.*
+cloudflare-worker/.cf-token
 
 # Системные файлы
 .DS_Store
