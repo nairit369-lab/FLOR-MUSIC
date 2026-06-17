@@ -485,9 +485,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^[\w-]+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      console.log(`[AUDIUS] stream request id=${id}`);
       const workerPath = `/audius/stream?id=${encodeURIComponent(id)}`;
       if (PROXY.workerUrl){
-        try { return await pipeFromWorker(req, res, workerPath); } catch {}
+        try { return await pipeFromWorker(req, res, workerPath); } catch (e){ console.log(`[AUDIUS] worker failed: ${e.message}`); }
       }
       const media = await audiusMediaUrl(id).catch(() => null);
       if (media) return pipeAudio(req, res, media);
@@ -519,9 +520,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^[\w-]{6,20}$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      console.log(`[YT] audio request id=${id}`);
       const workerPath = `/yt/stream?id=${encodeURIComponent(id)}`;
       if (PROXY.workerUrl){
-        try { return await pipeFromWorker(req, res, workerPath); } catch {}
+        try { return await pipeFromWorker(req, res, workerPath); } catch (e){ console.log(`[YT] worker failed: ${e.message}`); }
       }
       const audioUrl = await ytAudioUrl(id).catch(() => null);
       if (audioUrl) return pipeAudio(req, res, audioUrl);
@@ -569,9 +571,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = new URL(req.url, 'http://x').searchParams.get('id') || '';
       if (!/^\d+$/.test(id)){ res.writeHead(400); return res.end('bad id'); }
+      console.log(`[SC] audio request id=${id}`);
       const workerPath = `/sc/audio?id=${encodeURIComponent(id)}`;
       if (PROXY.workerUrl){
-        try { return await pipeFromWorker(req, res, workerPath); } catch {}
+        try { return await pipeFromWorker(req, res, workerPath); } catch (e){ console.log(`[SC] worker failed: ${e.message}`); }
       }
       const media = await scStreamUrl(id).catch(() => null);
       if (media) return pipeAudio(req, res, media);
@@ -756,15 +759,17 @@ async function pipeFromWorker(req, res, workerPath){
   const url = `${PROXY.workerUrl}${workerPath}`;
   const headers = { 'User-Agent': 'Mozilla/5.0' };
   if (req.headers.range) headers['Range'] = req.headers.range;
+  console.log(`[WORKER] → ${workerPath}`);
   const up = await fetch(url, { headers, signal: AbortSignal.timeout(120000) });
   if (!up.ok && up.status !== 206){
-    res.writeHead(up.status || 502);
-    return res.end('worker error');
+    console.log(`[WORKER] ✗ ${workerPath} → ${up.status}`);
+    throw new Error('worker ' + up.status);
   }
   const h = { 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
   const ct = up.headers.get('content-type'); if (ct) h['Content-Type'] = ct;
   const cl = up.headers.get('content-length'); if (cl) h['Content-Length'] = cl;
   const cr = up.headers.get('content-range'); if (cr) h['Content-Range'] = cr;
+  console.log(`[WORKER] ✓ ${workerPath} → ${up.status} ${ct || 'no-ct'} ${cl || 'no-cl'}`);
   res.writeHead(up.status, h);
   if (up.body) Readable.fromWeb(up.body).pipe(res);
   else res.end();
