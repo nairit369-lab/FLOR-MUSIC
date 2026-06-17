@@ -2076,7 +2076,7 @@ async function init(){
     }
     if (type === 'mediaerror'){
       const src = player.current?.source || '';
-      toast(src === 'youtube' ? 'YouTube: подождите или попробуйте Audius' : 'Источник недоступен, пропускаем');
+      toast(src === 'youtube' ? 'YouTube временно недоступен — ищите в SoundCloud' : 'Источник недоступен, пропускаем');
       return;
     }
     if (type === 'error' && player.queue.length <= 1) toast('Не удалось воспроизвести');

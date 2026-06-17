@@ -72,61 +72,7 @@ async function ytSearch(q){
   return [];
 }
 
-/* ---------- YouTube audio (direct innertube API + Piped fallback) ---------- */
-
-async function ytInnertubeAudio(id){
-  const clients = [
-    {
-      name: 'IOS',
-      payload: {
-        videoId: id,
-        context: {
-          client: { clientName: 'IOS', clientVersion: '19.29.1', hl: 'en', gl: 'US', deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '17.5.1.21F90' },
-        },
-        contentCheckOk: true, racyCheckOk: true,
-      },
-      key: 'AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc',
-    },
-    {
-      name: 'ANDROID',
-      payload: {
-        videoId: id,
-        context: {
-          client: { clientName: 'ANDROID', clientVersion: '19.29.37', hl: 'en', gl: 'US', androidSdkVersion: 34 },
-        },
-        contentCheckOk: true, racyCheckOk: true,
-      },
-      key: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
-    },
-  ];
-  for (const c of clients){
-    try {
-      const r = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${c.key}&prettyPrint=false`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': c.name === 'IOS'
-            ? 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)'
-            : 'com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip',
-        },
-        body: JSON.stringify(c.payload),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!r.ok) continue;
-      const j = await r.json();
-      if (j.playabilityStatus?.status !== 'OK') continue;
-      const formats = j.streamingData?.adaptiveFormats || [];
-      const audios = formats.filter(f => f?.url && /^audio/i.test(f.mimeType || ''));
-      if (!audios.length) continue;
-      audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-      const isM4a = a => /mp4a|m4a/i.test(a.mimeType || '');
-      const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
-                || audios.find(isM4a) || audios[0];
-      if (pick?.url) return pick.url;
-    } catch {}
-  }
-  return null;
-}
+/* ---------- YouTube audio (Piped muxed fallback) ---------- */
 
 function pickPipedPlayable(j, allowMuxed = false){
   const audios = (j.audioStreams || []).filter(a => a?.url);
@@ -144,8 +90,6 @@ function pickPipedPlayable(j, allowMuxed = false){
 }
 
 async function ytAudioUrl(id){
-  const direct = await ytInnertubeAudio(id);
-  if (direct) return direct;
   for (const inst of PIPED){
     try {
       const r = await upFetch(`${inst}/streams/${id}`);

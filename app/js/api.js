@@ -623,15 +623,15 @@ export async function search(query, source = 'all', limit = 30){
   if (source === 'radio')      return safe(radioSearch(query, limit));
 
   // "all" — query the main song sources in parallel and interleave.
-  // SoundCloud + Audius stream directly (work even where YouTube is blocked),
-  // so they lead; YouTube and iTunes follow.
-  const [sc, aud, yt, it] = await Promise.all([
-    safe(soundcloudSearch(query, Math.ceil(limit / 3)), 10000),
-    safe(audiusSearch(query, Math.ceil(limit / 3)), 10000),
-    safe(youtubeSearch(query, Math.ceil(limit / 3)), 12000),
+  // SoundCloud + Audius are primary (full-length, reliable).
+  // YouTube deprioritized (Piped/Invidious degraded by YouTube blocks).
+  // iTunes gives 30s previews only.
+  const [sc, aud, it] = await Promise.all([
+    safe(soundcloudSearch(query, Math.ceil(limit / 2)), 10000),
+    safe(audiusSearch(query, Math.ceil(limit / 2)), 10000),
     safe(itunesSearch(query, Math.ceil(limit / 3)), 8000),
   ]);
-  return interleave3(sc, aud, yt, it).slice(0, limit);
+  return interleave3(sc, aud, it).slice(0, limit);
 }
 
 const _IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
