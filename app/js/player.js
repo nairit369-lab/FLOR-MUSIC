@@ -2,7 +2,7 @@
    FLOR MUSIC — Audio playback engine
    All streams go through same-origin server proxy → background play on iOS/PWA.
    ============================================================ */
-import { playUrl } from './api.js?v=24';
+import { playUrl } from './api.js?v=25';
 
 const _IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
   || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -164,11 +164,11 @@ class Player {
 
   async playQueue(tracks, startIndex = 0){
     if (!tracks?.length) return;
-    await this._ensureUnlock();
     this.queue = tracks.slice();
     this.index = Math.max(0, Math.min(startIndex, tracks.length - 1));
-    await this._load(true);
     this._emit('queue');
+    await this._ensureUnlock();
+    await this._load(true);
   }
   async playTrack(track){
     const i = this.queue.findIndex(t => t.id === track.id);

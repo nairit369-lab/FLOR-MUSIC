@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=24';
-import { player } from './player.js?v=24';
+import { I } from './icons.js?v=25';
+import { player } from './player.js?v=25';
 import {
   SOURCES, search as apiSearch, primeAudius, loadProxyConfig, probeNetwork, netStatus, netHint,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop, homeWaveTracks, fetchHomeBundle,
-} from './api.js?v=24';
+} from './api.js?v=25';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -113,6 +113,13 @@ function persistWave(tracks){
   syncLibraryToServer();
 }
 
+function tapPlay(list, idx = 0){
+  if (!list?.length) return;
+  void player.playQueue(list, idx);
+  syncPlayerUI();
+  if (isMobile()) openFS();
+}
+
 function playMyWave(){
   let list = getWaveTracks();
   if (!list.length && state.home?.trending?.length){
@@ -120,8 +127,7 @@ function playMyWave(){
     persistWave(list);
   }
   if (!list.length){ toast('Загружаем волну…'); ensureHomeData(); return; }
-  player.playQueue(list, 0);
-  if (isMobile()) openFS();
+  tapPlay(list, 0);
 }
 
 /* ---------- in-memory state ---------- */
@@ -469,7 +475,7 @@ function renderResults(host){
     head.innerHTML = `<div class="m-sec-t" style="margin:0">Результаты</div><span style="font-size:12.5px;color:var(--text-3)">${state.results.length}</span>`;
     host.appendChild(head);
     const playBtn = el('button', 'm-pl-play'); playBtn.style.cssText = 'width:48px;height:48px;margin-bottom:8px'; playBtn.innerHTML = mIc('play', 22, '#fff');
-    playBtn.addEventListener('click', () => { player.playQueue(state.results, 0); openFS(); });
+    playBtn.addEventListener('click', () => tapPlay(state.results, 0));
     host.appendChild(playBtn);
     const tl = el('div');
     state.results.forEach((t, i) => tl.appendChild(mTrackRow(t, state.results, i)));
@@ -781,7 +787,7 @@ function mTrackRow(track, list, idx, ctx){
     <div class="lk ${isLiked ? 'on' : ''}">${mIc(isLiked ? 'heartFill' : 'heart', 19)}</div>
     <button class="maddpl" title="В плейлист">${mIc('plus', 20, 'var(--accent-2)')}</button>
     <button class="mmore" title="Ещё">${mIc('more', 20)}</button>`;
-  r.addEventListener('click', () => player.playQueue(list, idx));
+  r.addEventListener('click', () => tapPlay(list, idx));
   const lk = r.querySelector('.lk');
   lk.addEventListener('click', e => {
     e.stopPropagation(); toggleLike(track);
@@ -805,7 +811,7 @@ function mRow(title, items, kind){
       card.addEventListener('click', () => openPlaylist(it));
     } else {
       card.innerHTML = `${mCover(it, 130, 14)}<div class="ct">${esc(it.title)}</div><div class="cs">${esc(it.artist || '')}</div>`;
-      card.addEventListener('click', () => player.playQueue(items, i));
+      card.addEventListener('click', () => tapPlay(items, i));
     }
     hs.appendChild(card);
   });
@@ -985,8 +991,8 @@ function renderMPlaylist(ctx){
     listHost.innerHTML = '';
     if (!tracks.length){ const h = el('div', 'm-empty'); h.textContent = isUser ? 'Добавьте треки кнопкой «+» у любого трека.' : (isLiked ? 'Добавьте любимые треки ♥' : 'Не удалось получить треки.'); listHost.appendChild(h); }
     else tracks.forEach((t, i) => listHost.appendChild(mTrackRow(t, tracks, i, isUser ? { playlistId: ctx.id } : null)));
-    const pp = w.querySelector('#mPlPlay'); if (pp) pp.addEventListener('click', () => { if (tracks.length){ player.playQueue(tracks, 0); openFS(); } });
-    const sh = w.querySelector('#mPlShuf'); if (sh) sh.addEventListener('click', () => { if (tracks.length){ if (!player.shuffle) player.toggleShuffle(); player.playQueue(tracks, Math.floor(Math.random() * tracks.length)); } });
+    const pp = w.querySelector('#mPlPlay'); if (pp) pp.addEventListener('click', () => { if (tracks.length) tapPlay(tracks, 0); });
+    const sh = w.querySelector('#mPlShuf'); if (sh) sh.addEventListener('click', () => { if (tracks.length){ if (!player.shuffle) player.toggleShuffle(); tapPlay(tracks, Math.floor(Math.random() * tracks.length)); } });
   })();
 
   const del = hero.querySelector('#mPlDel'); if (del) del.addEventListener('click', () => { if (confirm('Удалить этот плейлист?')){ deletePlaylist(ctx.id); toast('Плейлист удалён'); go('library'); } });
@@ -1647,7 +1653,7 @@ function renderNotifPanel(){
   notifications.forEach(n => {
     const item = el('div', 'np-item' + (notifRead.has(n.id) ? '' : ' unread'));
     item.innerHTML = `<div class="np-ic">${n.icon || I.bell}</div><div class="np-tx"><div class="np-t">${esc(n.title)}</div><div class="np-b">${esc(n.body)}</div></div>`;
-    item.addEventListener('click', () => { if (n.track) player.playQueue([n.track], 0); markRead(n.id); item.classList.remove('unread'); updateNotifDot(); });
+    item.addEventListener('click', () => { if (n.track) tapPlay([n.track], 0); markRead(n.id); item.classList.remove('unread'); updateNotifDot(); });
     panel.appendChild(item);
   });
   const ra = panel.querySelector('#npReadAll');
@@ -1756,7 +1762,14 @@ function updateVolumeUI(){
 /* ============================================================
    Fullscreen player
    ============================================================ */
-function openFS(){ if (!player.current) return; $('#fsplayer').classList.add('open'); document.body.classList.add('fs-open'); syncFS(); }
+function openFS(){
+  if (!player.current) return;
+  const fs = $('#fsplayer');
+  if (!fs) return;
+  fs.classList.add('open');
+  document.body.classList.add('fs-open');
+  syncFS();
+}
 function closeFS(){ $('#fsplayer').classList.remove('open'); document.body.classList.remove('fs-open'); }
 
 // The YouTube engine stays hidden off-screen; the player always shows artwork.
