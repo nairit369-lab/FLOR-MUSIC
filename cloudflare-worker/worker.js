@@ -18,8 +18,8 @@ const INVIDIOUS = [
 ];
 const PIPED = [
   'https://api.piped.private.coffee',
-  'https://pipedapi.kavin.rocks',
   'https://pipedapi.adminforge.de',
+  'https://pipedapi.kavin.rocks',
 ];
 const AUDIUS_MIRRORS = [
   'https://discoveryprovider.audius.co',
@@ -73,19 +73,27 @@ async function ytSearch(q){
 }
 
 /* ---------- YouTube audio (Piped) ---------- */
+function pickPipedPlayable(j){
+  const audios = (j.audioStreams || []).filter(a => a?.url);
+  if (audios.length){
+    audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+    const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
+    const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
+              || audios.find(isM4a) || audios[0];
+    if (pick?.url) return pick.url;
+  }
+  const videos = (j.videoStreams || []).filter(v => v?.url && !v.videoOnly);
+  const muxed = videos.find(v => /mp4|mpeg|m4a/i.test(v.mimeType || v.format || ''));
+  return muxed?.url || videos[0]?.url || null;
+}
+
 async function ytAudioUrl(id){
   for (const inst of PIPED){
     try {
       const r = await upFetch(`${inst}/streams/${id}`);
       if (!r.ok) continue;
-      const j = await r.json();
-      const audios = (j.audioStreams || []).filter(a => a && a.url);
-      if (!audios.length) continue;
-      audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-      const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
-      const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
-                || audios.find(isM4a) || audios[0];
-      if (pick?.url) return pick.url;
+      const url = pickPipedPlayable(await r.json());
+      if (url) return url;
     } catch {}
   }
   return null;
