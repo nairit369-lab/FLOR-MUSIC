@@ -65,9 +65,8 @@
 *{ box-sizing: border-box; margin:0; padding:0; }
 #florAudio{
   position:fixed; left:0; bottom:0;
-  width:1px; height:1px;
-  opacity:0.001; pointer-events:none; z-index:0;
-  clip:rect(0,0,0,0); overflow:hidden;
+  width:2px; height:2px;
+  opacity:0.02; pointer-events:none; z-index:0;
 }
 .vpn-banner{
   display:flex; align-items:center; gap:10px;

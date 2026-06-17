@@ -823,25 +823,31 @@ const PIPED = [
 const audioCache = new Map();   // id -> { at, url }
 const AUDIO_TTL = 90 * 60 * 1000;
 
-async function pipedAudio(inst, id){
+function pickPipedPlayable(j, allowMuxed = false){
+  const audios = (j.audioStreams || []).filter(a => a?.url);
+  if (audios.length){
+    audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+    const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
+    const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
+              || audios.find(isM4a) || audios[0];
+    if (pick?.url) return pick.url;
+  }
+  if (!allowMuxed) return null;
+  const videos = (j.videoStreams || []).filter(v => v?.url && !v.videoOnly);
+  const muxed = videos.find(v => /mp4|mpeg|m4a/i.test(v.mimeType || v.format || ''));
+  return muxed?.url || videos[0]?.url || null;
+}
+
+async function pipedAudioAny(inst, id){
   const r = await fetch(`${inst}/streams/${id}`, {
     signal: AbortSignal.timeout(8000),
     headers: { 'User-Agent': 'Mozilla/5.0' },
   });
   if (!r.ok) throw new Error(inst + ' ' + r.status);
-  const url = pickPipedPlayable(await r.json());
+  const j = await r.json();
+  const url = pickPipedPlayable(j, false) || pickPipedPlayable(j, true);
   if (!url) throw new Error(inst + ' no streams');
   return url;
-}
-
-function pickPipedPlayable(j){
-  const audios = (j.audioStreams || []).filter(a => a?.url);
-  if (!audios.length) return null;
-  audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-  const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
-  const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
-            || audios.find(isM4a) || audios[0];
-  return pick?.url || null;
 }
 
 async function invidiousAudioUrl(id){
@@ -866,7 +872,7 @@ async function ytAudioUrl(id){
   const c = audioCache.get(id);
   if (c && Date.now() - c.at < AUDIO_TTL) return c.url;
   try {
-    const url = await Promise.any(PIPED.map(inst => pipedAudio(inst, id)));
+    const url = await Promise.any(PIPED.map(inst => pipedAudioAny(inst, id)));
     if (url){ audioCache.set(id, { at: Date.now(), url }); return url; }
   } catch {}
   const inv = await invidiousAudioUrl(id);

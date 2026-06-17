@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=22';
-import { player } from './player.js?v=22';
+import { I } from './icons.js?v=23';
+import { player } from './player.js?v=23';
 import {
   SOURCES, search as apiSearch, primeAudius, loadProxyConfig, probeNetwork, netStatus, netHint,
   audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop, homeWaveTracks,
-} from './api.js?v=22';
+} from './api.js?v=23';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -2049,7 +2049,11 @@ async function init(){
       toast(hint || 'Источник недоступен в вашей сети');
       return;
     }
-    if (type === 'mediaerror') toast('Источник недоступен, пропускаем');
+    if (type === 'mediaerror'){
+      const src = player.current?.source || '';
+      toast(src === 'youtube' ? 'YouTube: подождите или попробуйте Audius' : 'Источник недоступен, пропускаем');
+      return;
+    }
     if (type === 'error' && player.queue.length <= 1) toast('Не удалось воспроизвести');
     updateYtMode();
     syncPlayerUI();

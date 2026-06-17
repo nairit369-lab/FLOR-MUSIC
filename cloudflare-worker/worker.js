@@ -73,14 +73,19 @@ async function ytSearch(q){
 }
 
 /* ---------- YouTube audio (Piped) ---------- */
-function pickPipedPlayable(j){
+function pickPipedPlayable(j, allowMuxed = false){
   const audios = (j.audioStreams || []).filter(a => a?.url);
-  if (!audios.length) return null;
-  audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-  const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
-  const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
-            || audios.find(isM4a) || audios[0];
-  return pick?.url || null;
+  if (audios.length){
+    audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+    const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
+    const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
+              || audios.find(isM4a) || audios[0];
+    if (pick?.url) return pick.url;
+  }
+  if (!allowMuxed) return null;
+  const videos = (j.videoStreams || []).filter(v => v?.url && !v.videoOnly);
+  const muxed = videos.find(v => /mp4|mpeg|m4a/i.test(v.mimeType || v.format || ''));
+  return muxed?.url || videos[0]?.url || null;
 }
 
 async function invidiousAudioUrl(id){
@@ -103,11 +108,14 @@ async function ytAudioUrl(id){
     try {
       const r = await upFetch(`${inst}/streams/${id}`);
       if (!r.ok) continue;
-      const url = pickPipedPlayable(await r.json());
+      const j = await r.json();
+      const url = pickPipedPlayable(j, false) || pickPipedPlayable(j, true);
       if (url) return url;
     } catch {}
   }
-  return invidiousAudioUrl(id);
+  const inv = await invidiousAudioUrl(id);
+  if (inv) return inv;
+  return null;
 }
 
 /* ---------- SoundCloud ---------- */
