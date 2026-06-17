@@ -2,7 +2,10 @@
    FLOR MUSIC — Audio playback engine
    All streams go through same-origin server proxy → background play on iOS/PWA.
    ============================================================ */
-import { playUrl } from './api.js?v=23';
+import { playUrl } from './api.js?v=24';
+
+const _IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 class Player {
   constructor(){
@@ -17,6 +20,8 @@ class Player {
     this._lastLoadedId = null;
     this._volume = this._readVolume();
     this._intendedPlaying = false;
+    this._audioUnlocked = false;
+    this._needsGesture = false;
 
     if (document.readyState === 'loading'){
       document.addEventListener('DOMContentLoaded', () => this._initAudio());
@@ -56,6 +61,56 @@ class Player {
     });
 
     this._bindBackgroundHelpers();
+    this._bindIosUnlock();
+  }
+
+  _bindIosUnlock(){
+    if (!_IS_IOS) return;
+    const unlock = () => { this._ensureUnlock(); };
+    document.addEventListener('touchend', unlock, { once: true, passive: true });
+    document.addEventListener('click', unlock, { once: true });
+  }
+
+  async _ensureUnlock(){
+    if (this._audioUnlocked || !_IS_IOS) return true;
+    const a = this.audio;
+    const prevSrc = a.src;
+    const prevTime = a.currentTime;
+    try {
+      if (!a.src) a.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      a.muted = true;
+      await a.play();
+      a.pause();
+      a.muted = false;
+      a.currentTime = 0;
+      if (prevSrc) a.src = prevSrc;
+      else { a.removeAttribute('src'); a.load(); }
+      if (prevTime) a.currentTime = prevTime;
+      this._audioUnlocked = true;
+      if (this._needsGesture && this._intendedPlaying && this.current){
+        this._needsGesture = false;
+        try { await a.play(); } catch {}
+      }
+      return true;
+    } catch { return false; }
+  }
+
+  _waitCanPlay(audio, ms = 18000){
+    if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, ms);
+      const ok = () => { cleanup(); resolve(); };
+      const err = () => { cleanup(); reject(new Error('error')); };
+      const cleanup = () => {
+        clearTimeout(timer);
+        audio.removeEventListener('canplay', ok);
+        audio.removeEventListener('loadeddata', ok);
+        audio.removeEventListener('error', err);
+      };
+      audio.addEventListener('canplay', ok, { once: true });
+      audio.addEventListener('loadeddata', ok, { once: true });
+      audio.addEventListener('error', err, { once: true });
+    });
   }
 
   get audio(){
@@ -109,6 +164,7 @@ class Player {
 
   async playQueue(tracks, startIndex = 0){
     if (!tracks?.length) return;
+    await this._ensureUnlock();
     this.queue = tracks.slice();
     this.index = Math.max(0, Math.min(startIndex, tracks.length - 1));
     await this._load(true);
@@ -129,7 +185,18 @@ class Player {
   async toggle(){
     if (!this.current) return;
     if (this.playing){ this._intendedPlaying = false; this.audio.pause(); }
-    else { this._intendedPlaying = true; try { await this.audio.play(); } catch {} }
+    else {
+      this._intendedPlaying = true;
+      await this._ensureUnlock();
+      try {
+        if (this.audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) await this._waitCanPlay(this.audio, 12000);
+        await this.audio.play();
+        this._needsGesture = false;
+      } catch {
+        this._needsGesture = true;
+        this._emit('needgesture');
+      }
+    }
   }
   pause(){ this._intendedPlaying = false; this.audio.pause(); }
 
@@ -208,9 +275,23 @@ class Player {
       this.audio.load();
       if (autoplay){
         this._intendedPlaying = true;
-        try { await this.audio.play(); } catch { this._intendedPlaying = false; }
+        try {
+          await this._ensureUnlock();
+          await this._waitCanPlay(this.audio, 18000);
+          if (token !== this._loadToken) return;
+          await this.audio.play();
+          this._needsGesture = false;
+        } catch {
+          this._intendedPlaying = false;
+          this._needsGesture = true;
+          if (token === this._loadToken){
+            this.loading = false;
+            this._emit('needgesture');
+          }
+        }
+      } else if (token === this._loadToken){
+        this.loading = false;
       }
-      if (token === this._loadToken) this.loading = false;
     } catch (e){
       if (token !== this._loadToken) return;
       this.loading = false;

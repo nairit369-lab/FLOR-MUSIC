@@ -222,7 +222,7 @@
   /* progress = thin accent fill clipped to the rounded card top; no idle track line */
   .np-progress{ position:absolute; left:0; right:0; top:0; width:auto; padding:0; gap:0; }
   .np-progress .tm{ display:none; }
-  .np-progress .bar{ height:3px; border-radius:0; background:transparent; cursor:default; }
+  .np-progress .bar{ height:3px; border-radius:0; background:rgba(255,255,255,.1); cursor:default; }
   .np-progress .bar .fill{ border-radius:0; }
   .np-progress .bar .knob{ display:none; }
 

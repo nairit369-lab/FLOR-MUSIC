@@ -380,6 +380,37 @@ const server = http.createServer(async (req, res) => {
     return json(404, { error: 'Неизвестный метод' });
   }
 
+  // ---- API: bundled home screen data (one request for mobile) ----
+  if (urlPath === '/api/home'){
+    try {
+      const [trendingJ, plJ, elecJ, hipJ] = await Promise.all([
+        audiusProxy('/v1/tracks/trending', { time: 'week', limit: 14 }).catch(() => ({ data: [] })),
+        audiusProxy('/v1/playlists/trending', {}).catch(() => ({ data: [] })),
+        audiusProxy('/v1/tracks/trending', { genre: 'Electronic', limit: 12 }).catch(() => ({ data: [] })),
+        audiusProxy('/v1/tracks/trending', { genre: 'Hip-Hop/Rap', limit: 12 }).catch(() => ({ data: [] })),
+      ]);
+      let trending = trendingJ.data || [];
+      let trendingSource = 'audius';
+      if (!trending.length){
+        const r = await serverFetch('https://itunes.apple.com/search?term=top+hits&media=music&entity=song&limit=14');
+        const ij = await r.json();
+        trending = ij.results || [];
+        trendingSource = 'itunes';
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        trending,
+        trendingSource,
+        playlists: (plJ.data || []).slice(0, 10),
+        electronic: (elecJ.data || []).slice(0, 12),
+        hiphop: (hipJ.data || []).slice(0, 12),
+      }));
+    } catch (e){
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ trending: [], trendingSource: 'audius', playlists: [], electronic: [], hiphop: [] }));
+    }
+  }
+
   // ---- API: Audius / iTunes (proxied — works when the VPS blocks YouTube/SC) ----
   if (urlPath.startsWith('/api/audius/') || urlPath === '/api/itunes/search'){
     const params = new URL(req.url, 'http://x').searchParams;

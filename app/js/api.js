@@ -634,11 +634,54 @@ export async function search(query, source = 'all', limit = 30){
   return interleave3(sc, aud, yt, it).slice(0, limit);
 }
 
+const _IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 /* Fast home-page filler when Audius is slow or blocked. */
 export async function homeWaveTracks(limit = 14){
-  let tracks = await withTimeout(audiusTrending({ limit }), 10000, []);
-  if (tracks.length) return tracks;
-  return withTimeout(itunesSearch('top hits', limit), 8000, []);
+  const ms = _IS_IOS ? 18000 : 12000;
+  const [aud, it] = await Promise.all([
+    withTimeout(audiusTrending({ limit }), ms, []),
+    withTimeout(itunesSearch('top hits', limit), ms, []),
+  ]);
+  if (aud.length) return aud;
+  return it;
+}
+
+function mapHomePlaylists(list, limit = 10){
+  return (list || []).slice(0, limit).map(p => ({
+    id: 'pl:' + p.id,
+    rawId: p.id,
+    source: 'audius',
+    title: p.playlist_name || 'Плейлист',
+    subtitle: p.user?.name ? 'от ' + p.user.name : 'Audius',
+    kind: 'Плейлист',
+    artwork: audiusArtworkSet(p.artwork)[0] || null,
+    artworkFallbacks: audiusArtworkSet(p.artwork).slice(1),
+    desc: p.description || '',
+  })).filter(p => p.title);
+}
+
+/** One server round-trip for the home screen (faster on mobile networks). */
+export async function fetchHomeBundle(){
+  const ms = _IS_IOS ? 22000 : 16000;
+  try {
+    const r = await timedFetch('/api/home', {}, ms);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const trending = j.trendingSource === 'itunes'
+      ? (j.trending || []).map(normalizeItunes).filter(Boolean)
+      : (j.trending || []).map(normalizeAudius).filter(Boolean);
+    return {
+      trending,
+      playlists: mapHomePlaylists(j.playlists),
+      genres: [
+        { label: 'Электроника в тренде', tracks: (j.electronic || []).map(normalizeAudius).filter(Boolean) },
+        { label: 'Hip-Hop в тренде', tracks: (j.hiphop || []).map(normalizeAudius).filter(Boolean) },
+      ],
+      radio: [],
+    };
+  } catch { return null; }
 }
 
 /* ---------- helpers ---------- */

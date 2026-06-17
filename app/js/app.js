@@ -1,12 +1,12 @@
 /* ============================================================
    FLOR MUSIC — application logic (real search & playback)
    ============================================================ */
-import { I } from './icons.js?v=23';
-import { player } from './player.js?v=23';
+import { I } from './icons.js?v=24';
+import { player } from './player.js?v=24';
 import {
   SOURCES, search as apiSearch, primeAudius, loadProxyConfig, probeNetwork, netStatus, netHint,
-  audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop, homeWaveTracks,
-} from './api.js?v=23';
+  audiusTrending, audiusTrendingPlaylists, audiusPlaylistTracks, radioTop, homeWaveTracks, fetchHomeBundle,
+} from './api.js?v=24';
 
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -729,7 +729,15 @@ function ensureHomeData(){
   state.homeLoading = true;
   (async () => {
     try {
-      const slice = (p, ms = 10000) => Promise.race([
+      const bundle = await fetchHomeBundle();
+      if (bundle?.trending?.length){
+        state.home = bundle;
+        if (!loadJSON(WAVE_KEY, null)?.length) persistWave(bundle.trending);
+        buildNotifications();
+        return;
+      }
+      const sliceMs = isMobile() ? 18000 : 12000;
+      const slice = (p, ms = sliceMs) => Promise.race([
         p,
         new Promise(resolve => setTimeout(() => resolve([]), ms)),
       ]);
@@ -2047,6 +2055,10 @@ async function init(){
     if (type === 'blocked'){
       const hint = netHint(player.current?.source);
       toast(hint || 'Источник недоступен в вашей сети');
+      return;
+    }
+    if (type === 'needgesture'){
+      toast('Нажмите ▶ ещё раз — iPhone требует подтверждение');
       return;
     }
     if (type === 'mediaerror'){
