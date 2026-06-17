@@ -391,20 +391,38 @@ const server = http.createServer(async (req, res) => {
       ]);
       let trending = trendingJ.data || [];
       let trendingSource = 'audius';
+      if (!trending.length && PROXY.workerUrl){
+        const w = await workerJson('/audius/trending', { time: 'week' });
+        if (w?.data?.length) trending = w.data.slice(0, 14);
+      }
       if (!trending.length){
-        const r = await serverFetch('https://itunes.apple.com/search?term=top+hits&media=music&entity=song&limit=14');
-        const ij = await r.json();
-        trending = ij.results || [];
-        trendingSource = 'itunes';
+        try {
+          const r = await serverFetch('https://itunes.apple.com/search?term=top+hits&media=music&entity=song&limit=14');
+          const ij = await r.json();
+          trending = ij.results || [];
+          trendingSource = 'itunes';
+        } catch {
+          const w = await workerJson('/itunes/search', { q: 'top hits', limit: '14' });
+          if (w?.results?.length){ trending = w.results; trendingSource = 'itunes'; }
+        }
+      }
+      let playlists = (plJ.data || []).slice(0, 10);
+      let electronic = (elecJ.data || []).slice(0, 12);
+      let hiphop = (hipJ.data || []).slice(0, 12);
+      if (!playlists.length && PROXY.workerUrl){
+        const w = await workerJson('/audius/playlists/trending');
+        if (w?.data?.length) playlists = w.data.slice(0, 10);
+      }
+      if (!electronic.length && PROXY.workerUrl){
+        const w = await workerJson('/audius/trending', { genre: 'Electronic' });
+        if (w?.data?.length) electronic = w.data.slice(0, 12);
+      }
+      if (!hiphop.length && PROXY.workerUrl){
+        const w = await workerJson('/audius/trending', { genre: 'Hip-Hop/Rap' });
+        if (w?.data?.length) hiphop = w.data.slice(0, 12);
       }
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({
-        trending,
-        trendingSource,
-        playlists: (plJ.data || []).slice(0, 10),
-        electronic: (elecJ.data || []).slice(0, 12),
-        hiphop: (hipJ.data || []).slice(0, 12),
-      }));
+      return res.end(JSON.stringify({ trending, trendingSource, playlists, electronic, hiphop }));
     } catch (e){
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ trending: [], trendingSource: 'audius', playlists: [], electronic: [], hiphop: [] }));
@@ -426,26 +444,35 @@ const server = http.createServer(async (req, res) => {
       if (urlPath === '/api/audius/search'){
         const query = params.get('query') || params.get('q') || '';
         const limit = params.get('limit') || '30';
-        return jsonOk(await audiusProxy('/v1/tracks/search', { query, limit }));
+        try { return jsonOk(await audiusProxy('/v1/tracks/search', { query, limit })); }
+        catch { const w = await workerJson('/audius/search', { query, limit }); return jsonOk(w || { data: [] }); }
       }
       if (urlPath === '/api/audius/trending'){
         const p = { time: params.get('time') || 'week' };
         const genre = params.get('genre'); if (genre) p.genre = genre;
-        return jsonOk(await audiusProxy('/v1/tracks/trending', p));
+        try { return jsonOk(await audiusProxy('/v1/tracks/trending', p)); }
+        catch { const w = await workerJson('/audius/trending', p); return jsonOk(w || { data: [] }); }
       }
       if (urlPath === '/api/audius/playlists/trending'){
-        return jsonOk(await audiusProxy('/v1/playlists/trending', {}));
+        try { return jsonOk(await audiusProxy('/v1/playlists/trending', {})); }
+        catch { const w = await workerJson('/audius/playlists/trending'); return jsonOk(w || { data: [] }); }
       }
       if (urlPath === '/api/audius/playlists/tracks'){
         const id = params.get('id') || '';
         if (!id){ res.writeHead(400); return res.end('bad id'); }
-        return jsonOk(await audiusProxy(`/v1/playlists/${id}/tracks`, {}));
+        try { return jsonOk(await audiusProxy(`/v1/playlists/${id}/tracks`, {})); }
+        catch { const w = await workerJson('/audius/playlists/tracks', { id }); return jsonOk(w || { data: [] }); }
       }
       if (urlPath === '/api/itunes/search'){
         const q = params.get('q') || '';
         const limit = params.get('limit') || '30';
-        const r = await serverFetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&entity=song&limit=${limit}`);
-        return jsonOk(await r.json());
+        try {
+          const r = await serverFetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&entity=song&limit=${limit}`);
+          return jsonOk(await r.json());
+        } catch {
+          const w = await workerJson('/itunes/search', { q, limit });
+          return jsonOk(w || { results: [] });
+        }
       }
     } catch (e){
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -473,7 +500,13 @@ const server = http.createServer(async (req, res) => {
   // ---- API: YouTube search (server-side, no key, no CORS) ----
   if (urlPath === '/api/yt/search'){
     const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
-    const items = await ytSearch(q).catch(() => []);
+    let items = await ytSearch(q).catch(() => []);
+    if (!items.length && PROXY.workerUrl){
+      try {
+        const wr = await fetch(`${PROXY.workerUrl}/yt/search?q=${encodeURIComponent(q)}`, { signal: AbortSignal.timeout(10000) });
+        if (wr.ok){ const wj = await wr.json(); items = wj.items || []; }
+      } catch {}
+    }
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ items }));
   }
@@ -499,7 +532,13 @@ const server = http.createServer(async (req, res) => {
   // ---- API: SoundCloud search ----
   if (urlPath === '/api/sc/search'){
     const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
-    const items = await scSearch(q).catch(() => []);
+    let items = await scSearch(q).catch(() => []);
+    if (!items.length && PROXY.workerUrl){
+      try {
+        const wr = await fetch(`${PROXY.workerUrl}/sc/search?q=${encodeURIComponent(q)}`, { signal: AbortSignal.timeout(10000) });
+        if (wr.ok){ const wj = await wr.json(); items = wj.items || []; }
+      } catch {}
+    }
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ items }));
   }
