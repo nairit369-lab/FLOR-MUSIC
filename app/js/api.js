@@ -540,6 +540,7 @@ async function probeClientSoundcloud(){
 
 export async function probeNetwork(){
   await loadProxyConfig();
+  const hasWorker = !!_proxyBase;
   const [clientVpn, clientSc, server] = await Promise.all([
     probeClientPiped(),
     probeClientSoundcloud(),
@@ -551,8 +552,8 @@ export async function probeNetwork(){
   netStatus.serverYoutube = !!server.youtube;
   netStatus.serverAudius = server.audius !== false;
   // Playback goes through our server; worker fallback bypasses RU blocks.
-  netStatus.youtubeOk = !!(server.worker || server.youtube);
-  netStatus.soundcloudOk = !!(server.worker || clientSc);
+  netStatus.youtubeOk = !!(server.worker || server.youtube || hasWorker);
+  netStatus.soundcloudOk = !!(server.worker || clientSc || hasWorker);
   return netStatus;
 }
 

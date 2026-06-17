@@ -75,16 +75,27 @@ async function ytSearch(q){
 /* ---------- YouTube audio (Piped) ---------- */
 function pickPipedPlayable(j){
   const audios = (j.audioStreams || []).filter(a => a?.url);
-  if (audios.length){
-    audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-    const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
-    const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
-              || audios.find(isM4a) || audios[0];
-    if (pick?.url) return pick.url;
+  if (!audios.length) return null;
+  audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+  const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
+  const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
+            || audios.find(isM4a) || audios[0];
+  return pick?.url || null;
+}
+
+async function invidiousAudioUrl(id){
+  for (const inst of INVIDIOUS){
+    try {
+      const r = await upFetch(`${inst}/api/v1/videos/${id}`);
+      if (!r.ok) continue;
+      const j = await r.json();
+      const formats = (j.adaptiveFormats || []).filter(f => f?.url && /audio/i.test(f.type || ''));
+      formats.sort((a, b) => (parseInt(b.bitrate, 10) || 0) - (parseInt(a.bitrate, 10) || 0));
+      const pick = formats.find(f => /mp4|m4a/i.test(f.type || '')) || formats[0];
+      if (pick?.url) return pick.url;
+    } catch {}
   }
-  const videos = (j.videoStreams || []).filter(v => v?.url && !v.videoOnly);
-  const muxed = videos.find(v => /mp4|mpeg|m4a/i.test(v.mimeType || v.format || ''));
-  return muxed?.url || videos[0]?.url || null;
+  return null;
 }
 
 async function ytAudioUrl(id){
@@ -96,7 +107,7 @@ async function ytAudioUrl(id){
       if (url) return url;
     } catch {}
   }
-  return null;
+  return invidiousAudioUrl(id);
 }
 
 /* ---------- SoundCloud ---------- */
@@ -212,7 +223,8 @@ async function pipeStream(request, upstreamUrl){
   const h = new Headers(CORS);
   h.set('Accept-Ranges', 'bytes');
   h.set('Cache-Control', 'no-store');
-  const ct = up.headers.get('content-type'); if (ct) h.set('Content-Type', ct);
+  const ct = up.headers.get('content-type');
+  if (ct) h.set('Content-Type', /^video\/mp4/i.test(ct) ? 'audio/mp4' : ct);
   const cl = up.headers.get('content-length'); if (cl) h.set('Content-Length', cl);
   const cr = up.headers.get('content-range'); if (cr) h.set('Content-Range', cr);
   return new Response(up.body, { status: up.status, headers: h });

@@ -386,7 +386,11 @@ const server = http.createServer(async (req, res) => {
     const jsonOk = (obj) => { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
     try {
       if (urlPath === '/api/audius/host'){
-        return jsonOk({ host: await audiusGetHost() });
+        try { return jsonOk({ host: await audiusGetHost() }); }
+        catch {
+          const w = await workerJson('/audius/host');
+          return jsonOk(w?.host ? { host: w.host } : { host: AUDIUS_MIRRORS[0] });
+        }
       }
       if (urlPath === '/api/audius/search'){
         const query = params.get('query') || params.get('q') || '';
@@ -427,6 +431,7 @@ const server = http.createServer(async (req, res) => {
       return pipeAudioWithFallback(req, res, {
         localUrl: media,
         workerPath: `/audius/stream?id=${encodeURIComponent(id)}`,
+        workerFirst: true,
       });
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
@@ -451,6 +456,7 @@ const server = http.createServer(async (req, res) => {
       return pipeAudioWithFallback(req, res, {
         localUrl: audioUrl,
         workerPath: `/yt/stream?id=${encodeURIComponent(id)}`,
+        workerFirst: true,
       });
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
@@ -491,6 +497,7 @@ const server = http.createServer(async (req, res) => {
       return pipeAudioWithFallback(req, res, {
         localUrl: media,
         workerPath: `/sc/audio?id=${encodeURIComponent(id)}`,
+        workerFirst: true,
       });
     } catch (e){
       if (!res.headersSent) res.writeHead(502);
@@ -597,12 +604,43 @@ async function audiusGetHost(){
   return audiusHost;
 }
 
-async function audiusProxy(path, params){
+async function audiusProxyDirect(path, params){
   const host = await audiusGetHost();
   const qs = new URLSearchParams(params);
   if (!qs.has('app_name')) qs.set('app_name', 'FLOR-Music');
   const r = await serverFetch(`${host}${path}?${qs}`);
   return r.json();
+}
+
+async function workerJson(workerPath, params = {}){
+  if (!PROXY.workerUrl) return null;
+  const qs = new URLSearchParams(params);
+  const url = `${PROXY.workerUrl}${workerPath}?${qs}`;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(25000) });
+    if (!r.ok) return null;
+    return r.json();
+  } catch { return null; }
+}
+
+async function audiusProxy(path, params){
+  try { return await audiusProxyDirect(path, params); }
+  catch {
+    if (path === '/v1/tracks/search'){
+      return (await workerJson('/audius/search', { query: params.query, limit: params.limit })) || { data: [] };
+    }
+    if (path === '/v1/tracks/trending'){
+      return (await workerJson('/audius/trending', params)) || { data: [] };
+    }
+    if (path === '/v1/playlists/trending'){
+      return (await workerJson('/audius/playlists/trending', {})) || { data: [] };
+    }
+    if (path.includes('/playlists/') && path.endsWith('/tracks')){
+      const id = path.split('/')[3];
+      return (await workerJson('/audius/playlists/tracks', { id })) || { data: [] };
+    }
+    throw new Error('audius unavailable');
+  }
 }
 
 async function audiusMediaUrl(trackId){
@@ -620,13 +658,14 @@ async function audiusMediaUrl(trackId){
 async function pipeAudio(req, res, upstreamUrl){
   const headers = { 'User-Agent': 'Mozilla/5.0' };
   if (req.headers.range) headers['Range'] = req.headers.range;
-  const up = await fetch(upstreamUrl, { headers, redirect: 'follow', signal: AbortSignal.timeout(30000) });
+  const up = await fetch(upstreamUrl, { headers, redirect: 'follow', signal: AbortSignal.timeout(15000) });
   if (!up.ok && up.status !== 206){
-    res.writeHead(up.status || 502);
-    return res.end('upstream error');
+    throw new Error('upstream ' + (up.status || 502));
   }
   const h = { 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
-  const ct = up.headers.get('content-type'); if (ct) h['Content-Type'] = ct;
+  let ct = up.headers.get('content-type');
+  if (ct && /^video\/mp4/i.test(ct)) ct = 'audio/mp4';
+  if (ct) h['Content-Type'] = ct;
   const cl = up.headers.get('content-length'); if (cl) h['Content-Length'] = cl;
   const cr = up.headers.get('content-range'); if (cr) h['Content-Range'] = cr;
   res.writeHead(up.status, h);
@@ -653,12 +692,18 @@ async function pipeFromWorker(req, res, workerPath){
   else res.end();
 }
 
-async function pipeAudioWithFallback(req, res, { localUrl, workerPath }){
-  if (localUrl){
-    try { return await pipeAudio(req, res, localUrl); } catch {}
-  }
-  if (PROXY.workerUrl && workerPath){
-    try { return await pipeFromWorker(req, res, workerPath); } catch {}
+async function pipeAudioWithFallback(req, res, { localUrl, workerPath, workerFirst = false }){
+  const tryWorker = async () => {
+    if (PROXY.workerUrl && workerPath) return pipeFromWorker(req, res, workerPath);
+    throw new Error('no worker');
+  };
+  const tryLocal = async () => {
+    if (localUrl) return pipeAudio(req, res, localUrl);
+    throw new Error('no local');
+  };
+  const order = workerFirst ? [tryWorker, tryLocal] : [tryLocal, tryWorker];
+  for (const fn of order){
+    try { return await fn(); } catch {}
   }
   if (!res.headersSent) res.writeHead(502);
   res.end('no stream');
@@ -791,26 +836,41 @@ async function pipedAudio(inst, id){
 
 function pickPipedPlayable(j){
   const audios = (j.audioStreams || []).filter(a => a?.url);
-  if (audios.length){
-    audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-    const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
-    const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
-              || audios.find(isM4a) || audios[0];
-    if (pick?.url) return pick.url;
+  if (!audios.length) return null;
+  audios.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+  const isM4a = a => /mp4|m4a|mp4a/i.test(a.mimeType || a.format || '');
+  const pick = audios.find(a => isM4a(a) && (a.bitrate || 0) <= 160000)
+            || audios.find(isM4a) || audios[0];
+  return pick?.url || null;
+}
+
+async function invidiousAudioUrl(id){
+  for (const inst of INVIDIOUS){
+    try {
+      const r = await fetch(`${inst}/api/v1/videos/${id}`, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      });
+      if (!r.ok) continue;
+      const j = await r.json();
+      const formats = (j.adaptiveFormats || []).filter(f => f?.url && /audio/i.test(f.type || ''));
+      formats.sort((a, b) => (parseInt(b.bitrate, 10) || 0) - (parseInt(a.bitrate, 10) || 0));
+      const pick = formats.find(f => /mp4|m4a/i.test(f.type || '')) || formats[0];
+      if (pick?.url) return pick.url;
+    } catch {}
   }
-  const videos = (j.videoStreams || []).filter(v => v?.url && !v.videoOnly);
-  const muxed = videos.find(v => /mp4|mpeg|m4a/i.test(v.mimeType || v.format || ''));
-  return muxed?.url || videos[0]?.url || null;
+  return null;
 }
 
 async function ytAudioUrl(id){
   const c = audioCache.get(id);
   if (c && Date.now() - c.at < AUDIO_TTL) return c.url;
   try {
-    // Race every instance — take the first that returns a usable stream.
     const url = await Promise.any(PIPED.map(inst => pipedAudio(inst, id)));
     if (url){ audioCache.set(id, { at: Date.now(), url }); return url; }
   } catch {}
+  const inv = await invidiousAudioUrl(id);
+  if (inv){ audioCache.set(id, { at: Date.now(), url: inv }); return inv; }
   return null;
 }
 
